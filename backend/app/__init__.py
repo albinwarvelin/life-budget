@@ -1,0 +1,1 @@
+"""Life Budget backend package."""

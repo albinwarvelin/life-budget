@@ -1,0 +1,29 @@
+# Local configuration and data
+.env
+*.sqlite3
+*.db
+media/
+uploads/
+screenshots/
+exports/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# JavaScript
+node_modules/
+dist/
+.vite/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Repository-local instructions are intentionally not committed
+AGENTS.md
