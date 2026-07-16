@@ -19,6 +19,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -29,6 +30,12 @@ python -m pytest
 ruff check .
 ruff format --check .
 ```
+
+The default database is SQLite at `backend/life_budget.db`. Run `alembic upgrade head` from
+`backend/` after creating the virtual environment and whenever new migrations are added.
+Use `alembic current` to inspect the applied revision and `alembic history` to inspect available revisions.
+The initial migration seeds only NOK and SEK. Add EUR, USD, or another currency explicitly through
+`POST /api/v1/currencies`; it will then become available for accounts and transactions.
 
 ### Frontend
 
