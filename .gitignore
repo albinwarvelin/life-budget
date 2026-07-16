@@ -14,11 +14,13 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+*.egg-info/
 
 # JavaScript
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # Editor and OS files
 .DS_Store
