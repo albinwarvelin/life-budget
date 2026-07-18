@@ -72,6 +72,43 @@ def list_accounts(db: Session = Depends(get_db)) -> list[Account]:
     return list(db.scalars(select(Account).order_by(Account.name)))
 
 
+@router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
+    """Delete an account and all linked transactions, including local files."""
+    account = db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    for transaction in list(account.transactions):
+        _remove_attachment_file(transaction)
+        db.delete(transaction)
+    db.delete(account)
+    db.commit()
+
+
+@router.put("/accounts/{account_id}", response_model=AccountResponse)
+def update_account(
+    account_id: int, payload: AccountCreate, db: Session = Depends(get_db)
+) -> Account:
+    """Edit account details while protecting the currency of existing records."""
+    account = db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not db.get(Currency, payload.currency_code):
+        raise HTTPException(
+            status_code=400, detail="currency_code does not reference an existing currency"
+        )
+    if payload.currency_code != account.currency_code and account.transactions:
+        raise HTTPException(
+            status_code=400,
+            detail="Account currency cannot change after transactions have been recorded",
+        )
+    for key, value in payload.model_dump().items():
+        setattr(account, key, value)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
 def create_category(payload: CategoryCreate, db: Session = Depends(get_db)) -> Category:
     """Create a category and validate its optional parent relationship."""
@@ -92,6 +129,41 @@ def list_categories(db: Session = Depends(get_db)) -> list[Category]:
     return list(db.scalars(select(Category).order_by(Category.name)))
 
 
+@router.put("/categories/{category_id}", response_model=CategoryResponse)
+def update_category(
+    category_id: int, payload: CategoryCreate, db: Session = Depends(get_db)
+) -> Category:
+    """Edit a category while preserving the kind of already-linked transactions."""
+    category = db.get(Category, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if payload.parent_id is not None and payload.parent_id == category_id:
+        raise HTTPException(status_code=400, detail="A category cannot be its own parent")
+    if payload.parent_id is not None and not db.get(Category, payload.parent_id):
+        raise HTTPException(
+            status_code=400, detail="parent_id does not reference an existing category"
+        )
+    if payload.kind != category.kind and category.transactions:
+        raise HTTPException(status_code=400, detail="Category kind cannot change after use")
+    for key, value in payload.model_dump().items():
+        setattr(category, key, value)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(category_id: int, db: Session = Depends(get_db)) -> None:
+    """Delete a category and leave linked transactions uncategorized."""
+    category = db.get(Category, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Category not found")
+    for transaction in category.transactions:
+        transaction.category_id = None
+    db.delete(category)
+    db.commit()
+
+
 @router.post(
     "/transactions", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED
 )
@@ -109,7 +181,7 @@ def list_transactions(
     from_date: date | None = None,
     to_date: date | None = None,
     transaction_type: str | None = Query(
-        default=None, pattern="^(expense|income|reimbursement|transfer)$"
+        default=None, pattern="^(expense|income|reimbursement|savings|transfer)$"
     ),
     db: Session = Depends(get_db),
 ) -> list[Transaction]:
@@ -140,9 +212,21 @@ def update_transaction(
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db)) -> None:
     """Delete a transaction after locating it explicitly."""
     try:
+        transaction = db.get(Transaction, transaction_id)
+        if transaction is None:
+            raise LookupError("Transaction not found")
+        _remove_attachment_file(transaction)
         remove_transaction(db, transaction_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def _remove_attachment_file(transaction: Transaction) -> None:
+    """Remove a transaction's local attachment if one exists."""
+    if transaction.attachment_path:
+        attachment_path = Path(transaction.attachment_path)
+        if attachment_path.exists():
+            attachment_path.unlink()
 
 
 @router.post("/transactions/{transaction_id}/attachment", response_model=TransactionResponse)

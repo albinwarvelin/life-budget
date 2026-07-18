@@ -45,7 +45,7 @@ class CategoryCreate(BaseModel):
     """Input for a category whose kind controls which transactions may use it."""
 
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["expense", "income", "reimbursement"]
+    kind: Literal["expense", "income", "reimbursement", "savings"]
     parent_id: int | None = None
 
 
@@ -60,9 +60,12 @@ class TransactionCreate(BaseModel):
 
     transaction_date: date
     account_id: int
-    amount: Decimal = Field(ge=0, decimal_places=2)
+    # Savings uses a signed amount: positive means funds are put into savings;
+    # negative means funds are taken out. Other transaction types are checked
+    # as non-negative by the service layer.
+    amount: Decimal = Field(decimal_places=2)
     currency_code: str = Field(min_length=3, max_length=3)
-    transaction_type: Literal["expense", "income", "reimbursement", "transfer"]
+    transaction_type: Literal["expense", "income", "reimbursement", "savings", "transfer"]
     description: str = Field(min_length=1, max_length=240)
     merchant: str | None = Field(default=None, max_length=160)
     category_id: int | None = None

@@ -26,6 +26,8 @@ def require_transaction(db: Session, transaction_id: int) -> Transaction:
 
 def validate_transaction(db: Session, payload: TransactionCreate) -> None:
     """Check relationships before persistence so route handlers stay thin."""
+    if payload.transaction_type != "savings" and payload.amount < 0:
+        raise TransactionValidationError("Only savings amounts may be negative")
     account = db.get(Account, payload.account_id)
     if account is None:
         raise TransactionValidationError("account_id does not reference an existing account")

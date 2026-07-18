@@ -190,3 +190,121 @@ def test_transaction_attachment_can_be_uploaded_and_removed(client: TestClient) 
 
     removed = client.delete(f"/api/v1/transactions/{transaction['id']}/attachment")
     assert removed.status_code == 204
+
+
+def test_savings_accepts_positive_and_negative_amounts(client: TestClient) -> None:
+    """Positive savings deposits and negative savings withdrawals are preserved."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Savings", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories", json={"name": "Savings movement", "kind": "savings"}
+    ).json()
+    base = {
+        "transaction_date": "2026-07-18",
+        "account_id": account["id"],
+        "currency_code": "SEK",
+        "transaction_type": "savings",
+        "description": "Savings movement",
+        "category_id": category["id"],
+    }
+
+    deposited = client.post("/api/v1/transactions", json={**base, "amount": "200.00"})
+    withdrawn = client.post("/api/v1/transactions", json={**base, "amount": "-50.00"})
+    assert deposited.status_code == 201
+    assert withdrawn.status_code == 201
+    assert withdrawn.json()["amount"] == "-50.00"
+
+
+def test_account_can_be_edited_but_existing_currency_cannot_change(client: TestClient) -> None:
+    """Account labels can change without rewriting transaction currency history."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    client.post("/api/v1/currencies", json={"code": "NOK", "name": "Norwegian krone"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Old name", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    edited = client.put(
+        f"/api/v1/accounts/{account['id']}",
+        json={"name": "New name", "account_type": "cash", "currency_code": "SEK"},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["name"] == "New name"
+
+    client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "10.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "description": "History",
+        },
+    )
+    currency_change = client.put(
+        f"/api/v1/accounts/{account['id']}",
+        json={"name": "New name", "account_type": "cash", "currency_code": "NOK"},
+    )
+    assert currency_change.status_code == 400
+
+
+def test_deleting_account_removes_linked_transactions(client: TestClient) -> None:
+    """The account confirmation action has a cascading domain effect."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Disposable", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "10.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "description": "Linked record",
+        },
+    )
+    deleted = client.delete(f"/api/v1/accounts/{account['id']}")
+    assert deleted.status_code == 204
+    assert client.get("/api/v1/accounts").json() == []
+    assert client.get("/api/v1/transactions").json() == []
+
+
+def test_category_can_be_edited_and_deleted_without_deleting_transactions(
+    client: TestClient,
+) -> None:
+    """Deleting a category preserves the transaction as uncategorized."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories", json={"name": "Old name", "kind": "expense"}
+    ).json()
+    edited = client.put(
+        f"/api/v1/categories/{category['id']}",
+        json={"name": "New name", "kind": "expense"},
+    )
+    assert edited.status_code == 200
+    transaction = client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "10.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "description": "Categorized record",
+            "category_id": category["id"],
+        },
+    ).json()
+    assert client.delete(f"/api/v1/categories/{category['id']}").status_code == 204
+    remaining = client.get("/api/v1/transactions").json()
+    assert remaining[0]["id"] == transaction["id"]
+    assert remaining[0]["category_id"] is None

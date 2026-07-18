@@ -51,7 +51,7 @@ class Category(Base):
     __tablename__ = "categories"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('expense', 'income', 'reimbursement')", name="ck_categories_kind"
+            "kind IN ('expense', 'income', 'reimbursement', 'savings')", name="ck_categories_kind"
         ),
     )
 
@@ -66,15 +66,18 @@ class Category(Base):
 
 
 class Transaction(Base):
-    """A manual financial event; amount is stored as a non-negative decimal magnitude."""
+    """A manual financial event; savings may use a signed amount."""
 
     __tablename__ = "transactions"
     __table_args__ = (
         CheckConstraint(
-            "transaction_type IN ('expense', 'income', 'reimbursement', 'transfer')",
+            "transaction_type IN ('expense', 'income', 'reimbursement', 'savings', 'transfer')",
             name="ck_transactions_type",
         ),
-        CheckConstraint("amount >= 0", name="ck_transactions_amount_non_negative"),
+        CheckConstraint(
+            "amount >= 0 OR transaction_type = 'savings'",
+            name="ck_transactions_amount_non_negative",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

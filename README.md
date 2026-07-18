@@ -76,10 +76,23 @@ The frontend is available at `http://localhost:5173`. In development, Vite proxi
 `/health` requests to `http://localhost:8000`, so start the backend in a second terminal first.
 The frontend uses React Router for page URLs and TanStack Query for loading, caching, and refreshing
 backend data. The current UI includes account setup and manual transaction create/list/edit/delete.
+Frontend styling is powered by Tailwind CSS through the Vite plugin.
 
 The Transactions page has two views: Month shows transactions for one selected month, while Overview
-shows totals and breakdowns by account, category, and month. Transfers are excluded from income/expense
-totals. Reimbursements are shown separately and increase the net amount without being ordinary income.
+shows derived balances for each account and an expandable month → account → category activity view.
+Each account/month displays expenses, income, reimbursements, signed savings, and total. Transfers are
+excluded from those totals. Savings are signed: positive means putting funds into savings and negative
+means taking funds out. Account balances are currently derived from recorded transactions because no
+opening balance has been entered yet.
+
+Accounts can be edited from the Accounts page. Existing transaction currencies are protected, so an
+account with transaction history cannot be switched from SEK to NOK (or another currency).
+Accounts can also be deleted after confirmation; linked transactions and their local attachments are
+removed with the account. Categories can be created, edited, and deleted from Settings; deleting a
+category leaves transactions intact but makes them uncategorized.
+
+The Month view uses a navigable month picker with older/newer controls and a history menu. The table
+header also contains an Add transaction action for the selected month.
 Transactions can have one local file/image attachment, limited to 10 MB.
 Leave `VITE_API_BASE_URL` unset for the proxy, or set it in `.env` when connecting to another backend origin.
 
