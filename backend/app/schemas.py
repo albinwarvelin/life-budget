@@ -42,11 +42,12 @@ class AccountResponse(AccountCreate):
 
 
 class CategoryCreate(BaseModel):
-    """Input for a category whose kind controls which transactions may use it."""
+    """Input for a reusable category label and its reporting kind."""
 
     name: str = Field(min_length=1, max_length=120)
     kind: Literal["expense", "income", "reimbursement", "savings"]
     parent_id: int | None = None
+    localized_names: dict[str, str] = Field(default_factory=dict)
 
 
 class CategoryResponse(CategoryCreate):
@@ -66,8 +67,10 @@ class TransactionCreate(BaseModel):
     amount: Decimal = Field(decimal_places=2)
     currency_code: str = Field(min_length=3, max_length=3)
     transaction_type: Literal["expense", "income", "reimbursement", "savings", "transfer"]
-    description: str = Field(min_length=1, max_length=240)
-    merchant: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=240)
+    # Merchants are the strongest signal for categorisation, so every manual
+    # transaction must identify one. The frontend provides the required field.
+    merchant: str = Field(min_length=1, max_length=160)
     category_id: int | None = None
     notes: str | None = None
     source: str = Field(default="manual", max_length=30)

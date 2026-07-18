@@ -20,6 +20,7 @@ export type Account = {
 export type Category = {
   id: number;
   name: string;
+  localized_names: Record<string, string>;
   kind: "expense" | "income" | "reimbursement" | "savings";
   parent_id: number | null;
   is_active: boolean;
@@ -31,8 +32,8 @@ export type Transaction = {
   amount: string;
   currency_code: string;
   transaction_type: "expense" | "income" | "reimbursement" | "savings" | "transfer";
-  description: string;
-  merchant: string | null;
+  description: string | null;
+  merchant: string;
   category_id: number | null;
   notes: string | null;
   source: string;
@@ -56,8 +57,8 @@ export type TransactionInput = {
   amount: string;
   currency_code: string;
   transaction_type: Transaction["transaction_type"];
-  description: string;
-  merchant?: string;
+  description?: string;
+  merchant: string;
   category_id?: number | null;
   notes?: string;
   source?: string;
@@ -94,9 +95,9 @@ export const api = {
   deleteAccount: (id: number) =>
     request<void>(`/api/v1/accounts/${id}`, { method: "DELETE" }),
   listCategories: () => request<Category[]>("/api/v1/categories"),
-  createCategory: (input: { name: string; kind: Category["kind"]; parent_id?: number | null }) =>
+  createCategory: (input: { name: string; kind: Category["kind"]; parent_id?: number | null; localized_names?: Record<string, string> }) =>
     request<Category>("/api/v1/categories", { method: "POST", body: JSON.stringify(input) }),
-  updateCategory: (id: number, input: { name: string; kind: Category["kind"]; parent_id?: number | null }) =>
+  updateCategory: (id: number, input: { name: string; kind: Category["kind"]; parent_id?: number | null; localized_names?: Record<string, string> }) =>
     request<Category>(`/api/v1/categories/${id}`, { method: "PUT", body: JSON.stringify(input) }),
   deleteCategory: (id: number) =>
     request<void>(`/api/v1/categories/${id}`, { method: "DELETE" }),

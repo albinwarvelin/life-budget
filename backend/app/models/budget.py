@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    JSON,
     Numeric,
     String,
     Text,
@@ -57,6 +58,9 @@ class Category(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Keep the legacy name as a fallback while storing the user-facing labels
+    # separately for each supported UI language.
+    localized_names: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     kind: Mapped[str] = mapped_column(String(15), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -86,8 +90,8 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency_code: Mapped[str] = mapped_column(ForeignKey("currencies.code"), nullable=False)
     transaction_type: Mapped[str] = mapped_column(String(15), nullable=False)
-    description: Mapped[str] = mapped_column(String(240), nullable=False)
-    merchant: Mapped[str | None] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(String(240))
+    merchant: Mapped[str] = mapped_column(String(160), nullable=False)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")

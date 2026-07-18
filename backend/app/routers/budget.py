@@ -133,7 +133,7 @@ def list_categories(db: Session = Depends(get_db)) -> list[Category]:
 def update_category(
     category_id: int, payload: CategoryCreate, db: Session = Depends(get_db)
 ) -> Category:
-    """Edit a category while preserving the kind of already-linked transactions."""
+    """Edit a category, including changing its kind after it has been used."""
     category = db.get(Category, category_id)
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -143,8 +143,6 @@ def update_category(
         raise HTTPException(
             status_code=400, detail="parent_id does not reference an existing category"
         )
-    if payload.kind != category.kind and category.transactions:
-        raise HTTPException(status_code=400, detail="Category kind cannot change after use")
     for key, value in payload.model_dump().items():
         setattr(category, key, value)
     db.commit()
@@ -183,6 +181,7 @@ def list_transactions(
     transaction_type: str | None = Query(
         default=None, pattern="^(expense|income|reimbursement|savings|transfer)$"
     ),
+    account_id: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
 ) -> list[Transaction]:
     """List transactions with backend-validated date, currency, and type filters."""
@@ -192,6 +191,7 @@ def list_transactions(
         from_date=from_date,
         to_date=to_date,
         transaction_type=transaction_type,
+        account_id=account_id,
     )
 
 

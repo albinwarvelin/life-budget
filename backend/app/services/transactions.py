@@ -40,11 +40,8 @@ def validate_transaction(db: Session, payload: TransactionCreate) -> None:
     category = db.get(Category, payload.category_id)
     if category is None:
         raise TransactionValidationError("category_id does not reference an existing category")
-    # Transfers are deliberately uncategorized so summaries can exclude them.
-    if payload.transaction_type == "transfer" or category.kind != payload.transaction_type:
-        raise TransactionValidationError(
-            "Category kind must match transaction type; transfers have no category"
-        )
+    # Category kinds are labels, not a hard transaction constraint. This lets
+    # users reuse or reclassify a category without being blocked by history.
 
 
 def create_transaction(db: Session, payload: TransactionCreate) -> Transaction:
@@ -60,6 +57,7 @@ def find_transactions(
     from_date: date | None = None,
     to_date: date | None = None,
     transaction_type: str | None = None,
+    account_id: int | None = None,
 ) -> list[Transaction]:
     """Return transactions using the repository's stable date/id ordering."""
     return list_transactions(
@@ -68,6 +66,7 @@ def find_transactions(
         from_date=from_date,
         to_date=to_date,
         transaction_type=transaction_type,
+        account_id=account_id,
     )
 
 

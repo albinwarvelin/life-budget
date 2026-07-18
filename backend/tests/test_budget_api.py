@@ -46,6 +46,7 @@ def test_transaction_requires_matching_account_currency(client: TestClient) -> N
             "currency_code": "NOK",
             "transaction_type": "expense",
             "description": "Invalid currency",
+            "merchant": "Test merchant",
         },
     )
     assert response.status_code == 400
@@ -90,6 +91,7 @@ def test_transfer_is_allowed_without_category_and_can_be_filtered(client: TestCl
             "currency_code": "SEK",
             "transaction_type": "transfer",
             "description": "Move to savings",
+            "merchant": "Internal transfer",
         },
     )
     assert created.status_code == 201
@@ -97,6 +99,31 @@ def test_transfer_is_allowed_without_category_and_can_be_filtered(client: TestCl
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["transaction_type"] == "transfer"
+
+
+def test_transactions_can_be_filtered_by_account(client: TestClient) -> None:
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    first = client.post(
+        "/api/v1/accounts",
+        json={"name": "First", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    second = client.post(
+        "/api/v1/accounts",
+        json={"name": "Second", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    payload = {
+        "transaction_date": "2026-07-16",
+        "amount": "10.00",
+        "currency_code": "SEK",
+        "transaction_type": "expense",
+        "description": "Account filter",
+        "merchant": "Test merchant",
+    }
+    client.post("/api/v1/transactions", json={**payload, "account_id": first["id"]})
+    client.post("/api/v1/transactions", json={**payload, "account_id": second["id"]})
+    response = client.get("/api/v1/transactions", params={"account_id": first["id"]})
+    assert response.status_code == 200
+    assert {item["account_id"] for item in response.json()} == {first["id"]}
 
 
 def test_transaction_can_be_created_listed_updated_and_deleted(client: TestClient) -> None:
@@ -113,6 +140,7 @@ def test_transaction_can_be_created_listed_updated_and_deleted(client: TestClien
         "currency_code": "SEK",
         "transaction_type": "expense",
         "description": "Initial description",
+        "merchant": "Test merchant",
     }
 
     created = client.post("/api/v1/transactions", json=payload)
@@ -155,6 +183,7 @@ def test_reimbursement_is_a_distinct_transaction_type(client: TestClient) -> Non
             "currency_code": "SEK",
             "transaction_type": "reimbursement",
             "description": "Lunch reimbursement",
+            "merchant": "Restaurant",
             "category_id": category["id"],
         },
     )
@@ -178,6 +207,7 @@ def test_transaction_attachment_can_be_uploaded_and_removed(client: TestClient) 
             "currency_code": "SEK",
             "transaction_type": "expense",
             "description": "Receipt test",
+            "merchant": "Shop",
         },
     ).json()
 
@@ -208,6 +238,7 @@ def test_savings_accepts_positive_and_negative_amounts(client: TestClient) -> No
         "currency_code": "SEK",
         "transaction_type": "savings",
         "description": "Savings movement",
+        "merchant": "Savings account",
         "category_id": category["id"],
     }
 
@@ -242,6 +273,7 @@ def test_account_can_be_edited_but_existing_currency_cannot_change(client: TestC
             "currency_code": "SEK",
             "transaction_type": "expense",
             "description": "History",
+            "merchant": "Test merchant",
         },
     )
     currency_change = client.put(
@@ -301,6 +333,7 @@ def test_category_can_be_edited_and_deleted_without_deleting_transactions(
             "currency_code": "SEK",
             "transaction_type": "expense",
             "description": "Categorized record",
+            "merchant": "Test merchant",
             "category_id": category["id"],
         },
     ).json()
@@ -308,3 +341,46 @@ def test_category_can_be_edited_and_deleted_without_deleting_transactions(
     remaining = client.get("/api/v1/transactions").json()
     assert remaining[0]["id"] == transaction["id"]
     assert remaining[0]["category_id"] is None
+
+
+def test_category_localized_names_are_saved_and_returned(client: TestClient) -> None:
+    """Category labels are returned as a locale-keyed dictionary for the UI."""
+    response = client.post(
+        "/api/v1/categories",
+        json={
+            "name": "Groceries",
+            "kind": "expense",
+            "localized_names": {"en": "Groceries", "sv": "Matvaror"},
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["localized_names"] == {"en": "Groceries", "sv": "Matvaror"}
+
+
+def test_category_kind_can_change_after_use(client: TestClient) -> None:
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories", json={"name": "Flexible", "kind": "expense"}
+    ).json()
+    transaction = client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "5.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "merchant": "Test merchant",
+            "category_id": category["id"],
+        },
+    )
+    assert transaction.status_code == 201
+    changed = client.put(
+        f"/api/v1/categories/{category['id']}",
+        json={"name": "Flexible", "kind": "income"},
+    )
+    assert changed.status_code == 200

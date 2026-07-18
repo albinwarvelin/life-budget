@@ -13,7 +13,7 @@ function transaction(overrides: Partial<Transaction>): Transaction {
     currency_code: "SEK",
     transaction_type: "expense",
     description: "Test",
-    merchant: null,
+    merchant: "Test merchant",
     category_id: null,
     notes: null,
     source: "manual",

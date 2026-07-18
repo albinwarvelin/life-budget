@@ -18,6 +18,7 @@ def list_transactions(
     from_date: date | None = None,
     to_date: date | None = None,
     transaction_type: str | None = None,
+    account_id: int | None = None,
 ) -> list[Transaction]:
     """Build and execute the transaction list query used by the API."""
     statement: Select[tuple[Transaction]] = select(Transaction).order_by(
@@ -31,6 +32,8 @@ def list_transactions(
         statement = statement.where(Transaction.transaction_date <= to_date)
     if transaction_type:
         statement = statement.where(Transaction.transaction_type == transaction_type)
+    if account_id:
+        statement = statement.where(Transaction.account_id == account_id)
     return list(db.scalars(statement))
 
 
