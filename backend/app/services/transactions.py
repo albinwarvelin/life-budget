@@ -3,6 +3,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.models import Account, Category, Transaction
+from app.services.category_learning import learn_from_transaction
 from app.repositories.transactions import (
     delete_transaction,
     get_transaction,
@@ -26,8 +27,8 @@ def require_transaction(db: Session, transaction_id: int) -> Transaction:
 
 def validate_transaction(db: Session, payload: TransactionCreate) -> None:
     """Check relationships before persistence so route handlers stay thin."""
-    if payload.transaction_type != "savings" and payload.amount < 0:
-        raise TransactionValidationError("Only savings amounts may be negative")
+    if payload.transaction_type not in {"savings", "transfer"} and payload.amount < 0:
+        raise TransactionValidationError("Only savings and transfer amounts may be negative")
     account = db.get(Account, payload.account_id)
     if account is None:
         raise TransactionValidationError("account_id does not reference an existing account")
@@ -47,7 +48,9 @@ def validate_transaction(db: Session, payload: TransactionCreate) -> None:
 def create_transaction(db: Session, payload: TransactionCreate) -> Transaction:
     """Validate and persist a new manually entered transaction."""
     validate_transaction(db, payload)
-    return save_transaction(db, Transaction(**payload.model_dump()))
+    transaction = save_transaction(db, Transaction(**payload.model_dump()))
+    learn_from_transaction(transaction)
+    return transaction
 
 
 def find_transactions(
@@ -76,7 +79,9 @@ def update_transaction(db: Session, transaction_id: int, payload: TransactionCre
     validate_transaction(db, payload)
     for key, value in payload.model_dump().items():
         setattr(transaction, key, value)
-    return save_transaction(db, transaction)
+    transaction = save_transaction(db, transaction)
+    learn_from_transaction(transaction)
+    return transaction
 
 
 def remove_transaction(db: Session, transaction_id: int) -> None:

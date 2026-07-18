@@ -8,6 +8,8 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     database_url: str = "sqlite:///./life_budget.db"
+    # Keep learned merchant/category patterns isolated from financial records.
+    learning_database_url: str = "sqlite:///./life_budget_learning.db"
     frontend_origin: str = "http://localhost:5173"
     upload_dir: str = "uploads"
 

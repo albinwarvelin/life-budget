@@ -101,6 +101,29 @@ def test_transfer_is_allowed_without_category_and_can_be_filtered(client: TestCl
     assert response.json()[0]["transaction_type"] == "transfer"
 
 
+def test_transfer_accepts_positive_and_negative_amounts(client: TestClient) -> None:
+    """A transfer's sign records which direction the movement represents."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    base = {
+        "transaction_date": "2026-07-18",
+        "account_id": account["id"],
+        "currency_code": "SEK",
+        "transaction_type": "transfer",
+        "merchant": "Savings transfer",
+    }
+
+    positive = client.post("/api/v1/transactions", json={**base, "amount": "100.00"})
+    negative = client.post("/api/v1/transactions", json={**base, "amount": "-100.00"})
+
+    assert positive.status_code == 201
+    assert negative.status_code == 201
+    assert negative.json()["amount"] == "-100.00"
+
+
 def test_transactions_can_be_filtered_by_account(client: TestClient) -> None:
     client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
     first = client.post(
@@ -384,3 +407,118 @@ def test_category_kind_can_change_after_use(client: TestClient) -> None:
         json={"name": "Flexible", "kind": "income"},
     )
     assert changed.status_code == 200
+
+
+def test_category_suggestion_learns_from_a_saved_transaction(client: TestClient) -> None:
+    """A later draft receives the category from a previous confirmed entry."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories",
+        json={"name": "Groceries", "kind": "expense"},
+    ).json()
+    saved = client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "25.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "merchant": "Unique learning merchant",
+            "category_id": category["id"],
+        },
+    )
+    assert saved.status_code == 201
+    prediction = client.post(
+        "/api/v1/category-suggestions",
+        json={
+            "merchant": "Unique learning merchant",
+            "account_id": account["id"],
+            "transaction_type": "expense",
+        },
+    )
+    assert prediction.status_code == 200
+    assert prediction.json()[0]["category_id"] == category["id"]
+
+
+def test_category_suggestion_uses_all_merchant_words(client: TestClient) -> None:
+    """A shared merchant word connects related store variants."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories", json={"name": "Groceries", "kind": "expense"}
+    ).json()
+    saved = client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "25.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "merchant": "ICA Kvantum",
+            "category_id": category["id"],
+        },
+    )
+    assert saved.status_code == 201
+    prediction = client.post(
+        "/api/v1/category-suggestions",
+        json={
+            "merchant": "ICA nära",
+            "account_id": account["id"],
+            "transaction_type": "expense",
+        },
+    )
+    assert prediction.status_code == 200
+    assert prediction.json()[0]["category_id"] == category["id"]
+
+
+def test_learning_model_endpoint_exposes_safe_graph_snapshot(client: TestClient) -> None:
+    """The explorer receives connections and totals, but not raw event records."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories",
+        json={
+            "name": "Groceries",
+            "kind": "expense",
+            "localized_names": {"en": "Groceries", "sv": "Matvaror"},
+        },
+    ).json()
+    client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-18",
+            "account_id": account["id"],
+            "amount": "20.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "merchant": "ICA Kvantum",
+            "category_id": category["id"],
+        },
+    )
+
+    response = client.get("/api/v1/category-learning/model")
+    assert response.status_code == 200
+    body = response.json()
+    # The learning store deliberately outlives the isolated financial test DB,
+    # so only assert that at least this event has been retained.
+    assert body["event_count"] >= 1
+    assert body["categories"][0]["localized_names"]["sv"] == "Matvaror"
+    assert any(
+        pattern["pattern_type"] == "merchant_token" and pattern["pattern_text"] == "ica"
+        for pattern in body["patterns"]
+    )
+    assert body["scoring"]["signal_weights"]["merchant"] == 4.0
+    assert body["scoring"]["similarity_threshold"] == 0.72
+    assert "events" not in body

@@ -70,7 +70,7 @@ class Category(Base):
 
 
 class Transaction(Base):
-    """A manual financial event; savings may use a signed amount."""
+    """A manual financial event; savings and transfers may use signed amounts."""
 
     __tablename__ = "transactions"
     __table_args__ = (
@@ -79,7 +79,7 @@ class Transaction(Base):
             name="ck_transactions_type",
         ),
         CheckConstraint(
-            "amount >= 0 OR transaction_type = 'savings'",
+            "amount >= 0 OR transaction_type IN ('savings', 'transfer')",
             name="ck_transactions_amount_non_negative",
         ),
     )

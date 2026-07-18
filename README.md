@@ -20,6 +20,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
 alembic upgrade head
+alembic -c alembic_learning.ini upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -31,7 +32,11 @@ ruff check .
 ruff format --check .
 ```
 
-The default database is SQLite at `backend/life_budget.db`. SQLite is a file, not a separate
+The default financial database is SQLite at `backend/life_budget.db`. The category-learning
+service uses a separate SQLite file at `backend/life_budget_learning.db` by default. It stores
+only normalized merchant/description signals, category IDs, observations, and weights—not
+transaction amounts or account names. Both files are local SQLite files, not separate servers.
+SQLite is a file, not a separate
 server process: Alembic creates the file and tables when you run `alembic upgrade head` from
 `backend/`.
 Use `alembic current` to inspect the applied revision and `alembic history` to inspect available revisions.
@@ -59,7 +64,30 @@ PUT    /api/v1/transactions/{transaction_id}
 DELETE /api/v1/transactions/{transaction_id}
 ```
 
-The API writes to `life_budget.db` through SQLAlchemy sessions. The route handler receives the
+The API writes financial data to `life_budget.db` through SQLAlchemy sessions. The category
+prediction endpoints read/write the isolated learning database:
+
+```text
+POST /api/v1/category-suggestions
+POST /api/v1/category-learning/events
+GET  /api/v1/category-learning/model
+```
+
+The two SQLite files have separate Alembic histories. Future financial schema changes belong in
+`backend/alembic/versions/`; future learning-model changes belong in
+`backend/alembic_learning/versions/`.
+
+The manual-entry form requests suggestions whenever merchant, description, account, or
+transaction type changes. Saving a categorized transaction records a learning event and updates
+weighted merchant, description, and combined-text connections. Suggestions are advisory and must
+still be selected or confirmed by the user.
+
+Settings → Learning model opens an interactive, localized explorer. Its graph connects learned
+phrases to categories, supports signal/account/type filters, and shows each selected phrase's
+relative evidence distribution. The live prediction lab uses the same backend scoring service as
+manual transaction entry and waits one second after typing before requesting a prediction.
+
+The route handler receives the
 HTTP request, the transaction service enforces financial rules, and the repository performs the
 database operation. Transfers are kept as transactions but can be excluded from later spending
 and income summaries.
@@ -81,9 +109,10 @@ Frontend styling is powered by Tailwind CSS through the Vite plugin.
 The Transactions page has two views: Month shows transactions for one selected month, while Overview
 shows derived balances for each account and an expandable month → account → category activity view.
 Each account/month displays expenses, income, reimbursements, signed savings, and total. Transfers are
-excluded from those totals. Savings are signed: positive means putting funds into savings and negative
-means taking funds out. Account balances are currently derived from recorded transactions because no
-opening balance has been entered yet.
+excluded from those totals. Savings and transfers are signed: positive savings means putting funds into
+savings, while negative savings means taking funds out; a transfer's sign records its direction for the
+account. Account balances are currently derived from recorded transactions because no opening balance
+has been entered yet.
 
 Accounts can be edited from the Accounts page. Existing transaction currencies are protected, so an
 account with transaction history cannot be switched from SEK to NOK (or another currency).

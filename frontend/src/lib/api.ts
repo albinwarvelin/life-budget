@@ -64,6 +64,34 @@ export type TransactionInput = {
   source?: string;
 };
 
+export type CategoryPrediction = {
+  category_id: number;
+  confidence: number;
+  reason: string;
+};
+
+export type LearningPattern = {
+  id: number;
+  pattern_type: string;
+  pattern_text: string;
+  category_id: number;
+  account_id: number | null;
+  transaction_type: Transaction["transaction_type"] | null;
+  weight: number;
+  observations: number;
+};
+
+export type LearningModel = {
+  categories: Pick<Category, "id" | "name" | "localized_names" | "kind">[];
+  patterns: LearningPattern[];
+  event_count: number;
+  scoring: {
+    signal_weights: Record<string, number>;
+    account_multiplier: number;
+    similarity_threshold: number;
+  };
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const isFormData = options?.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -95,6 +123,18 @@ export const api = {
   deleteAccount: (id: number) =>
     request<void>(`/api/v1/accounts/${id}`, { method: "DELETE" }),
   listCategories: () => request<Category[]>("/api/v1/categories"),
+  getLearningModel: () =>
+    request<LearningModel>("/api/v1/category-learning/model"),
+  suggestCategories: (input: {
+    merchant: string;
+    description?: string;
+    account_id?: number;
+    transaction_type?: Transaction["transaction_type"];
+  }) =>
+    request<CategoryPrediction[]>("/api/v1/category-suggestions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   createCategory: (input: { name: string; kind: Category["kind"]; parent_id?: number | null; localized_names?: Record<string, string> }) =>
     request<Category>("/api/v1/categories", { method: "POST", body: JSON.stringify(input) }),
   updateCategory: (id: number, input: { name: string; kind: Category["kind"]; parent_id?: number | null; localized_names?: Record<string, string> }) =>

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.routers.budget import router as budget_router
+from app.routers.category_learning import router as category_learning_router
 
 app = FastAPI(title="Life Budget API", version="0.1.0")
 # Vite proxies requests in development, but this also permits an explicit
@@ -15,6 +16,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 app.include_router(budget_router, prefix="/api/v1", tags=["budget"])
+app.include_router(category_learning_router, prefix="/api/v1", tags=["category-learning"])
 
 
 @app.get("/health", tags=["system"])
