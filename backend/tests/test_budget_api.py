@@ -97,3 +97,96 @@ def test_transfer_is_allowed_without_category_and_can_be_filtered(client: TestCl
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["transaction_type"] == "transfer"
+
+
+def test_transaction_can_be_created_listed_updated_and_deleted(client: TestClient) -> None:
+    """Verify that each manual transaction endpoint changes persisted state."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    payload = {
+        "transaction_date": "2026-07-15",
+        "account_id": account["id"],
+        "amount": "25.50",
+        "currency_code": "SEK",
+        "transaction_type": "expense",
+        "description": "Initial description",
+    }
+
+    created = client.post("/api/v1/transactions", json=payload)
+    assert created.status_code == 201
+    transaction_id = created.json()["id"]
+
+    listed = client.get("/api/v1/transactions")
+    assert listed.status_code == 200
+    assert listed.json()[0]["description"] == "Initial description"
+
+    updated_payload = {**payload, "description": "Updated description", "amount": "30.00"}
+    updated = client.put(f"/api/v1/transactions/{transaction_id}", json=updated_payload)
+    assert updated.status_code == 200
+    assert updated.json()["description"] == "Updated description"
+    assert updated.json()["amount"] == "30.00"
+
+    deleted = client.delete(f"/api/v1/transactions/{transaction_id}")
+    assert deleted.status_code == 204
+    assert client.delete(f"/api/v1/transactions/{transaction_id}").status_code == 404
+    assert client.get("/api/v1/transactions").json() == []
+
+
+def test_reimbursement_is_a_distinct_transaction_type(client: TestClient) -> None:
+    """Reimbursements use their own category/type instead of ordinary income."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    category = client.post(
+        "/api/v1/categories", json={"name": "Paid back", "kind": "reimbursement"}
+    ).json()
+
+    response = client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-17",
+            "account_id": account["id"],
+            "amount": "50.00",
+            "currency_code": "SEK",
+            "transaction_type": "reimbursement",
+            "description": "Lunch reimbursement",
+            "category_id": category["id"],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["transaction_type"] == "reimbursement"
+
+
+def test_transaction_attachment_can_be_uploaded_and_removed(client: TestClient) -> None:
+    """Attachments are stored locally and their metadata follows the transaction."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    transaction = client.post(
+        "/api/v1/transactions",
+        json={
+            "transaction_date": "2026-07-17",
+            "account_id": account["id"],
+            "amount": "20.00",
+            "currency_code": "SEK",
+            "transaction_type": "expense",
+            "description": "Receipt test",
+        },
+    ).json()
+
+    uploaded = client.post(
+        f"/api/v1/transactions/{transaction['id']}/attachment",
+        files={"file": ("receipt.png", b"fake image bytes", "image/png")},
+    )
+    assert uploaded.status_code == 200
+    assert uploaded.json()["attachment_filename"] == "receipt.png"
+
+    removed = client.delete(f"/api/v1/transactions/{transaction['id']}/attachment")
+    assert removed.status_code == 204

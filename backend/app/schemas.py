@@ -45,7 +45,7 @@ class CategoryCreate(BaseModel):
     """Input for a category whose kind controls which transactions may use it."""
 
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["expense", "income"]
+    kind: Literal["expense", "income", "reimbursement"]
     parent_id: int | None = None
 
 
@@ -62,7 +62,7 @@ class TransactionCreate(BaseModel):
     account_id: int
     amount: Decimal = Field(ge=0, decimal_places=2)
     currency_code: str = Field(min_length=3, max_length=3)
-    transaction_type: Literal["expense", "income", "transfer"]
+    transaction_type: Literal["expense", "income", "reimbursement", "transfer"]
     description: str = Field(min_length=1, max_length=240)
     merchant: str | None = Field(default=None, max_length=160)
     category_id: int | None = None
@@ -79,4 +79,7 @@ class TransactionResponse(TransactionCreate):
     id: int
     created_at: datetime
     updated_at: datetime
+    attachment_filename: str | None = None
+    attachment_content_type: str | None = None
+    attachment_size: int | None = None
     model_config = ConfigDict(from_attributes=True)

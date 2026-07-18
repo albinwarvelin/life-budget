@@ -49,11 +49,15 @@ class Category(Base):
     """An expense or income label, optionally nested under a parent category."""
 
     __tablename__ = "categories"
-    __table_args__ = (CheckConstraint("kind IN ('expense', 'income')", name="ck_categories_kind"),)
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('expense', 'income', 'reimbursement')", name="ck_categories_kind"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    kind: Mapped[str] = mapped_column(String(15), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
@@ -67,7 +71,8 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         CheckConstraint(
-            "transaction_type IN ('expense', 'income', 'transfer')", name="ck_transactions_type"
+            "transaction_type IN ('expense', 'income', 'reimbursement', 'transfer')",
+            name="ck_transactions_type",
         ),
         CheckConstraint("amount >= 0", name="ck_transactions_amount_non_negative"),
     )
@@ -77,12 +82,16 @@ class Transaction(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency_code: Mapped[str] = mapped_column(ForeignKey("currencies.code"), nullable=False)
-    transaction_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(15), nullable=False)
     description: Mapped[str] = mapped_column(String(240), nullable=False)
     merchant: Mapped[str | None] = mapped_column(String(160))
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    attachment_filename: Mapped[str | None] = mapped_column(String(255))
+    attachment_path: Mapped[str | None] = mapped_column(String(500))
+    attachment_content_type: Mapped[str | None] = mapped_column(String(120))
+    attachment_size: Mapped[int | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )

@@ -35,10 +35,12 @@ def upgrade() -> None:
         "categories",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(length=120), nullable=False),
-        sa.Column("kind", sa.String(length=10), nullable=False),
+        sa.Column("kind", sa.String(length=15), nullable=False),
         sa.Column("parent_id", sa.Integer(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.CheckConstraint("kind IN ('expense', 'income')", name="ck_categories_kind"),
+        sa.CheckConstraint(
+            "kind IN ('expense', 'income', 'reimbursement')", name="ck_categories_kind"
+        ),
         sa.ForeignKeyConstraint(["parent_id"], ["categories.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -49,12 +51,16 @@ def upgrade() -> None:
         sa.Column("account_id", sa.Integer(), nullable=False),
         sa.Column("amount", sa.Numeric(precision=18, scale=2), nullable=False),
         sa.Column("currency_code", sa.String(length=3), nullable=False),
-        sa.Column("transaction_type", sa.String(length=10), nullable=False),
+        sa.Column("transaction_type", sa.String(length=15), nullable=False),
         sa.Column("description", sa.String(length=240), nullable=False),
         sa.Column("merchant", sa.String(length=160), nullable=True),
         sa.Column("category_id", sa.Integer(), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("source", sa.String(length=30), nullable=False),
+        sa.Column("attachment_filename", sa.String(length=255), nullable=True),
+        sa.Column("attachment_path", sa.String(length=500), nullable=True),
+        sa.Column("attachment_content_type", sa.String(length=120), nullable=True),
+        sa.Column("attachment_size", sa.Integer(), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(), server_default=sa.func.current_timestamp(), nullable=False
         ),
@@ -62,7 +68,8 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(), server_default=sa.func.current_timestamp(), nullable=False
         ),
         sa.CheckConstraint(
-            "transaction_type IN ('expense', 'income', 'transfer')", name="ck_transactions_type"
+            "transaction_type IN ('expense', 'income', 'reimbursement', 'transfer')",
+            name="ck_transactions_type",
         ),
         sa.CheckConstraint("amount >= 0", name="ck_transactions_amount_non_negative"),
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"]),
