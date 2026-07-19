@@ -17,6 +17,8 @@ class CategoryLearningEvent(LearningBase):
     category_id: Mapped[int] = mapped_column(index=True)
     account_id: Mapped[int | None] = mapped_column(index=True)
     transaction_type: Mapped[str | None] = mapped_column(String(15))
+    amount_band: Mapped[str | None] = mapped_column(String(30), index=True)
+    currency_code: Mapped[str | None] = mapped_column(String(3))
     source: Mapped[str] = mapped_column(String(30), default="manual")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()

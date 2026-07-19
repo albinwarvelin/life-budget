@@ -8,7 +8,7 @@ const translations = {
     localWorkspace: "Local workspace", privateByDefault: "Private by default", yourMoney: "Your money, clearly",
     transactionSubtitle: "Record and review the movement of money across your accounts.", addTransaction: "Add transaction",
     currency: "Currency", allCurrencies: "All currencies", type: "Type", allTypes: "All types", expense: "Expense",
-    expenses: "Expenses", income: "Income", reimbursement: "Reimbursement", reimbursements: "Reimbursements", savings: "Savings", savingsPositive: "Positive means putting funds into savings; negative means taking funds out.", transfer: "Transfer", transfers: "Transfers",
+    expenses: "Expenses", income: "Income", reimbursement: "Reimbursement", reimbursements: "Reimbursements", savings: "Savings", savingsPositive: "Negative means putting funds into savings; positive means taking funds out.", transfer: "Transfer", transfers: "Transfers",
     records: "records", date: "Date", description: "Description", account: "Account", category: "Category", suggestedCategory: "Suggested category", useSuggestion: "Use suggestion", amount: "Amount", actions: "Actions",
     uncategorized: "Uncategorized", edit: "Edit", delete: "Delete", noTransactions: "No transactions yet", noTransactionsText: "Add your first transaction to start seeing your money clearly.",
     manualEntry: "Manual entry", editTransaction: "Edit transaction", addTransactionTitle: "Add transaction", close: "Close", cancel: "Cancel", saveChanges: "Save changes", saving: "Saving…",

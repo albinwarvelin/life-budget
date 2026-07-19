@@ -522,3 +522,13 @@ def test_learning_model_endpoint_exposes_safe_graph_snapshot(client: TestClient)
     assert body["scoring"]["signal_weights"]["merchant"] == 4.0
     assert body["scoring"]["similarity_threshold"] == 0.72
     assert "events" not in body
+
+
+def test_explorer_exposes_category_type_and_description_models(client: TestClient) -> None:
+    """The frontend switcher receives one stable graph contract for every learner."""
+    for model_kind in ("category", "type", "description"):
+        response = client.get(f"/api/v1/learning-models/{model_kind}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["model_kind"] == model_kind
+        assert set(body) == {"model_kind", "targets", "patterns", "event_count", "scoring"}

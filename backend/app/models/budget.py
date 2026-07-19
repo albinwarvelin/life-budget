@@ -109,3 +109,67 @@ class Transaction(Base):
     account: Mapped[Account] = relationship(back_populates="transactions")
     currency: Mapped[Currency] = relationship(back_populates="transactions")
     category: Mapped[Category | None] = relationship(back_populates="transactions")
+
+
+class ImportBatch(Base):
+    """One locally stored screenshot moving through extraction and review."""
+
+    __tablename__ = "import_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False, default="screenshot")
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    currency_code: Mapped[str] = mapped_column(ForeignKey("currencies.code"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
+    progress: Mapped[int] = mapped_column(nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )
+
+    drafts: Mapped[list["ImportDraftRow"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan", order_by="ImportDraftRow.row_index"
+    )
+
+
+class ImportDraftRow(Base):
+    """Editable OCR output that cannot affect finances until explicit approval."""
+
+    __tablename__ = "import_draft_rows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("import_batches.id"), nullable=False, index=True
+    )
+    row_index: Mapped[int] = mapped_column(nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_amount_text: Mapped[str | None] = mapped_column(String(80))
+    source_bounds: Mapped[dict[str, int] | None] = mapped_column(JSON)
+    transaction_date: Mapped[date | None] = mapped_column(Date)
+    merchant: Mapped[str | None] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(String(240))
+    # Keep the model output separate from the editable value for auditability.
+    predicted_description: Mapped[str | None] = mapped_column(String(240))
+    signed_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    account_id: Mapped[int] = mapped_column(nullable=False)
+    predicted_category_id: Mapped[int | None] = mapped_column()
+    predicted_transaction_type: Mapped[str | None] = mapped_column(String(15))
+    category_confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    type_confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    description_confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    extraction_confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    validation_errors: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    possible_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+
+    batch: Mapped[ImportBatch] = relationship(back_populates="drafts")

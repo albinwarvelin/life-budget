@@ -12,6 +12,8 @@ def save_learning_event(
     category_id: int,
     account_id: int | None,
     transaction_type: str | None,
+    amount_band: str | None,
+    currency_code: str | None,
     source: str,
 ) -> CategoryLearningEvent:
     """Append one user-confirmed learning event."""
@@ -21,6 +23,8 @@ def save_learning_event(
         category_id=category_id,
         account_id=account_id,
         transaction_type=transaction_type,
+        amount_band=amount_band,
+        currency_code=currency_code,
         source=source,
     )
     db.add(event)

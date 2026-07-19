@@ -61,9 +61,8 @@ class TransactionCreate(BaseModel):
 
     transaction_date: date
     account_id: int
-    # Savings uses a signed amount: positive means funds are put into savings;
-    # negative means funds are taken out. Other transaction types are checked
-    # as non-negative by the service layer.
+    # Savings and transfers use signed amounts. Other transaction types are
+    # stored as non-negative magnitudes by the service layer.
     amount: Decimal = Field(decimal_places=2)
     currency_code: str = Field(min_length=3, max_length=3)
     transaction_type: Literal["expense", "income", "reimbursement", "savings", "transfer"]

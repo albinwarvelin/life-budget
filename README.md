@@ -21,6 +21,8 @@ python -m venv .venv
 pip install -e ".[dev]"
 alembic upgrade head
 alembic -c alembic_learning.ini upgrade head
+alembic -c alembic_type_learning.ini upgrade head
+alembic -c alembic_description_learning.ini upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -35,7 +37,10 @@ ruff format --check .
 The default financial database is SQLite at `backend/life_budget.db`. The category-learning
 service uses a separate SQLite file at `backend/life_budget_learning.db` by default. It stores
 only normalized merchant/description signals, category IDs, observations, and weights—not
-transaction amounts or account names. Both files are local SQLite files, not separate servers.
+transaction amounts or account names. Category learning now also stores coarse currency-aware amount
+bands, never exact paid amounts. Type learning uses `life_budget_type_learning.db`, while approved
+description suggestions use `life_budget_description_learning.db`. These are local SQLite files, not
+separate servers.
 SQLite is a file, not a separate
 server process: Alembic creates the file and tables when you run `alembic upgrade head` from
 `backend/`.
@@ -51,6 +56,9 @@ From PowerShell, use:
 cd life-budget\backend
 .\.venv\Scripts\Activate.ps1
 alembic upgrade head
+alembic -c alembic_learning.ini upgrade head
+alembic -c alembic_type_learning.ini upgrade head
+alembic -c alembic_description_learning.ini upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -73,19 +81,51 @@ POST /api/v1/category-learning/events
 GET  /api/v1/category-learning/model
 ```
 
-The two SQLite files have separate Alembic histories. Future financial schema changes belong in
+The financial and category-learning SQLite files have separate Alembic histories. Future financial schema changes belong in
 `backend/alembic/versions/`; future learning-model changes belong in
 `backend/alembic_learning/versions/`.
 
-The manual-entry form requests suggestions whenever merchant, description, account, or
-transaction type changes. Saving a categorized transaction records a learning event and updates
-weighted merchant, description, and combined-text connections. Suggestions are advisory and must
+Transaction-type learning uses a third isolated file, `backend/life_budget_type_learning.db`, and
+its own migration history in `backend/alembic_type_learning/`. Run
+`alembic -c alembic_type_learning.ini upgrade head` after pulling type-model schema changes.
+Description learning uses `backend/life_budget_description_learning.db` and its own migration history
+in `backend/alembic_description_learning/`. Run
+`alembic -c alembic_description_learning.ini upgrade head` after description-model schema changes.
+
+### Screenshot imports
+
+The Transactions page contains an **Import screenshot** button. The browser first shows the selected
+image locally; only pressing **Confirm and parse** uploads it. Processing progress is persisted and
+polled by the frontend. Parsed rows remain `ImportDraftRow` records until the user edits and approves
+them in the review dialog. Approval creates transactions in one financial database commit, then sends
+the confirmed merchant/category/type/description values to the three isolated learning stores.
+
+OCR is local and requires the `tesseract` executable. Install Tesseract OCR separately and include the
+`eng`, `swe`, and `nor` language data for best results. If the executable is not on `PATH`, set
+`TESSERACT_COMMAND` in `.env` to its full path. `TESSERACT_LANGUAGES` defaults to `eng+swe+nor`; the
+parser falls back to English if the Scandinavian language packs are unavailable. Screenshots are
+limited to PNG, JPEG, or WebP files up to 15 MB and are stored below `uploads/imports/`, which is
+ignored by Git.
+
+The parser inverts dark screenshots, enlarges and sharpens text, runs table and sparse-text OCR passes,
+then groups columns into rows using their image coordinates. This preserves left-column merchants and
+recovers thin minus signs that OCR occasionally omits. It preserves the raw OCR text and signed source
+amount, reports per-row confidence, and flags explainable possible duplicates. Category
+prediction uses the existing category model first. The separate type model then combines amount sign,
+merchant/full-word signals, low-weight amount magnitude, and the predicted category. If OCR did not
+produce a description, a third model suggests one from merchant words, category, type, currency-aware
+amount band, and previous approved descriptions. Expenses, income, and reimbursements are
+stored as positive magnitudes after review; savings and transfers retain the reviewed sign.
+
+The manual-entry form requests suggestions one second after merchant, description, amount, account,
+currency, or transaction type changes. Saving a categorized transaction records a learning event and
+updates weighted whole-phrase, single-word, combined-text, and low-weight amount-band connections.
+Suggestions are advisory and must
 still be selected or confirmed by the user.
 
 Settings → Learning model opens an interactive, localized explorer. Its graph connects learned
-phrases to categories, supports signal/account/type filters, and shows each selected phrase's
-relative evidence distribution. The live prediction lab uses the same backend scoring service as
-manual transaction entry and waits one second after typing before requesting a prediction.
+signals to prediction outputs. Switch it among category, transaction-type, and description models;
+each selected word, phrase, sign, category, or amount band shows its relative evidence distribution.
 
 The route handler receives the
 HTTP request, the transaction service enforces financial rules, and the repository performs the
@@ -108,10 +148,11 @@ Frontend styling is powered by Tailwind CSS through the Vite plugin.
 
 The Transactions page has two views: Month shows transactions for one selected month, while Overview
 shows derived balances for each account and an expandable month → account → category activity view.
-Each account/month displays expenses, income, reimbursements, signed savings, and total. Transfers are
-excluded from those totals. Savings and transfers are signed: positive savings means putting funds into
-savings, while negative savings means taking funds out; a transfer's sign records its direction for the
-account. Account balances are currently derived from recorded transactions because no opening balance
+Each account/month displays expenses, income, reimbursements, signed savings, signed transfers, and total.
+Transfers are included in the total and account balances using their signed amount. A positive transfer increases
+the balance represented by that account and a negative transfer decreases it. Savings and transfers are signed:
+positive savings means putting funds into savings, while negative savings means taking funds out. Account balances
+are currently derived from recorded transactions because no opening balance
 has been entered yet.
 
 Accounts can be edited from the Accounts page. Existing transaction currencies are protected, so an

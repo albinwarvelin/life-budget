@@ -1,7 +1,6 @@
 import logging
-import re
-import unicodedata
 from difflib import SequenceMatcher
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,6 +14,7 @@ from app.repositories.category_learning import (
 )
 from app.schemas_learning import CategoryPrediction, CategoryPredictionRequest
 from app.learning_db import LearningSessionLocal, ensure_learning_schema
+from app.services.learning_features import amount_band, normalize_text, tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -26,30 +26,12 @@ SIGNAL_WEIGHTS = {
     "description": 1.5,
     "description_token": 0.25,
     "combined": 2.0,
+    # Amount magnitude is useful context, but remains much weaker than text.
+    "amount_band": 0.12,
+    "merchant_amount_band": 0.35,
 }
 ACCOUNT_MULTIPLIER = 1.25
 SIMILARITY_THRESHOLD = 0.72
-
-
-def normalize_text(value: str | None) -> str:
-    """Create a stable, privacy-conscious key for matching user-entered text."""
-    if not value:
-        return ""
-    without_accents = "".join(
-        character
-        for character in unicodedata.normalize("NFKD", value)
-        if not unicodedata.combining(character)
-    )
-    return re.sub(r"[^a-z0-9]+", " ", without_accents.lower()).strip()
-
-
-def tokenize(value: str | None) -> list[str]:
-    """Return distinct words while preserving their first-seen order."""
-    normalized = normalize_text(value)
-    # Ignore one-character noise, but retain every meaningful word. The
-    # distinct list prevents repeated words in one entry from multiplying one
-    # learning event unfairly.
-    return list(dict.fromkeys(token for token in normalized.split() if len(token) > 1))
 
 
 def _connections(request: CategoryPredictionRequest) -> list[tuple[str, str, float]]:
@@ -69,6 +51,17 @@ def _connections(request: CategoryPredictionRequest) -> list[tuple[str, str, flo
             for token in tokenize(description)
         )
         signals.append(("combined", f"{merchant} {description}", SIGNAL_WEIGHTS["combined"]))
+    band = amount_band(request.amount, request.currency_code)
+    if band:
+        signals.append(("amount_band", band, SIGNAL_WEIGHTS["amount_band"]))
+        if merchant:
+            signals.append(
+                (
+                    "merchant_amount_band",
+                    f"{merchant}|{band}",
+                    SIGNAL_WEIGHTS["merchant_amount_band"],
+                )
+            )
     return signals
 
 
@@ -79,6 +72,8 @@ def record_learning_event(
     description: str | None,
     account_id: int | None,
     transaction_type: str | None,
+    amount: Decimal | None = None,
+    currency_code: str | None = None,
     source: str = "manual",
 ) -> None:
     """Persist an event and update the weighted model in the separate database."""
@@ -90,6 +85,8 @@ def record_learning_event(
         description=description,
         account_id=account_id,
         transaction_type=transaction_type,
+        amount=amount,
+        currency_code=currency_code,
     )
     with LearningSessionLocal() as db:
         save_learning_event(
@@ -99,6 +96,8 @@ def record_learning_event(
             category_id=category_id,
             account_id=account_id,
             transaction_type=transaction_type,
+            amount_band=amount_band(amount, currency_code) or None,
+            currency_code=currency_code.upper() if currency_code else None,
             source=source,
         )
         for pattern_type, pattern_text, base_weight in _connections(request):
@@ -141,6 +140,8 @@ def learn_from_transaction(transaction: Transaction) -> None:
             description=transaction.description,
             account_id=transaction.account_id,
             transaction_type=transaction.transaction_type,
+            amount=transaction.amount,
+            currency_code=transaction.currency_code,
             source=transaction.source,
         )
     except Exception:  # Learning must never prevent a financial record from saving.
@@ -167,7 +168,15 @@ def predict_categories(
         for signal_type, text, base_weight in signals:
             if signal_type != pattern.pattern_type or not text:
                 continue
-            similarity = SequenceMatcher(None, text, pattern.pattern_text).ratio()
+            # A stored word is a real independent connection. Require an exact
+            # token match so short words contribute reliably without fuzzy
+            # collisions; full phrases still receive typo-tolerant matching.
+            if signal_type.endswith("_token"):
+                if text != pattern.pattern_text:
+                    continue
+                similarity = 1.0
+            else:
+                similarity = SequenceMatcher(None, text, pattern.pattern_text).ratio()
             if similarity < SIMILARITY_THRESHOLD:
                 continue
             multiplier = ACCOUNT_MULTIPLIER if pattern.account_id == request.account_id else 1.0

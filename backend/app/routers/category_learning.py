@@ -84,5 +84,7 @@ def create_learning_event(
         description=payload.description,
         account_id=payload.account_id,
         transaction_type=payload.transaction_type,
+        amount=payload.amount,
+        currency_code=payload.currency_code,
         source=payload.source,
     )

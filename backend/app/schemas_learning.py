@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 
@@ -8,6 +10,8 @@ class CategoryPredictionRequest(BaseModel):
     description: str | None = Field(default=None, max_length=240)
     account_id: int | None = Field(default=None, ge=1)
     transaction_type: str | None = Field(default=None, max_length=15)
+    amount: Decimal | None = Field(default=None, decimal_places=2)
+    currency_code: str | None = Field(default=None, min_length=3, max_length=3)
 
 
 class CategoryPrediction(BaseModel):
@@ -60,3 +64,39 @@ class LearningModelResponse(BaseModel):
     patterns: list[LearningPattern]
     event_count: int
     scoring: LearningScoringConfig
+
+
+class ExplorerTarget(BaseModel):
+    """One prediction output shown on the right side of any model graph."""
+
+    key: str
+    label: str
+    localized_names: dict[str, str] = Field(default_factory=dict)
+
+
+class ExplorerPattern(BaseModel):
+    """A model-neutral feature-to-output connection for the explorer."""
+
+    id: int
+    pattern_type: str
+    pattern_text: str
+    target_key: str
+    weight: float
+    observations: int
+    account_id: int | None = None
+    transaction_type: str | None = None
+    category_id: int | None = None
+
+
+class ExplorerScoringConfig(BaseModel):
+    signal_weights: dict[str, float]
+    similarity_threshold: float
+    account_multiplier: float | None = None
+
+
+class ExplorerModelResponse(BaseModel):
+    model_kind: str
+    targets: list[ExplorerTarget]
+    patterns: list[ExplorerPattern]
+    event_count: int
+    scoring: ExplorerScoringConfig
