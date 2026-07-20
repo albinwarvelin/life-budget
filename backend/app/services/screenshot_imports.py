@@ -11,7 +11,7 @@ from app.description_learning_db import (
     ensure_description_learning_schema,
 )
 from app.learning_db import LearningSessionLocal, ensure_learning_schema
-from app.models import ImportDraftRow, Transaction
+from app.models import ImportBatch, ImportDraftRow, Transaction
 from app.repositories.imports import get_import_batch, replace_import_drafts
 from app.schemas import TransactionCreate
 from app.schemas_imports import ApproveImportRequest, ApproveImportResponse
@@ -40,7 +40,16 @@ def process_screenshot_batch(batch_id: int) -> None:
             batch.status = "processing"
             batch.progress = 10
             db.commit()
-            extracted_rows = screenshot_parser.parse(Path(batch.stored_path), batch.currency_code)
+            fallback_year = _recent_account_import_year(
+                db,
+                account_id=batch.account_id,
+                exclude_batch_id=batch.id,
+            )
+            extracted_rows = screenshot_parser.parse(
+                Path(batch.stored_path),
+                batch.currency_code,
+                fallback_year=fallback_year,
+            )
             batch.progress = 40
             db.commit()
 
@@ -102,7 +111,9 @@ def process_screenshot_batch(batch_id: int) -> None:
                             description=suggested_description,
                             predicted_description=description_prediction.description,
                             signed_amount=extracted.signed_amount,
-                            currency_code=extracted.currency_code,
+                            # Import currency is owned by the selected account,
+                            # never by a foreign amount annotation found by OCR.
+                            currency_code=batch.currency_code,
                             account_id=batch.account_id,
                             predicted_category_id=category_id,
                             predicted_transaction_type=type_prediction.transaction_type,
@@ -248,6 +259,43 @@ def _predict_category(
         if suggestions:
             return suggestions[0].category_id, suggestions[0].confidence
     return None, 0.0
+
+
+def _recent_account_import_year(
+    db: Session,
+    *,
+    account_id: int,
+    exclude_batch_id: int | None = None,
+) -> int | None:
+    """Recall the latest persisted import year for one account.
+
+    A previous reviewed import is the best reference because it came through
+    the same OCR workflow. A recently created transaction is a fallback for an
+    account that has not completed a screenshot import yet. No current-calendar
+    guess is made when neither source exists.
+    """
+    imported_date = db.scalar(
+        select(ImportDraftRow.transaction_date)
+        .join(ImportBatch, ImportDraftRow.batch_id == ImportBatch.id)
+        .where(
+            ImportBatch.account_id == account_id,
+            ImportBatch.id != exclude_batch_id if exclude_batch_id is not None else True,
+            ImportBatch.status.in_(("review", "completed")),
+            ImportDraftRow.transaction_date.is_not(None),
+        )
+        .order_by(ImportBatch.updated_at.desc(), ImportDraftRow.id.desc())
+        .limit(1)
+    )
+    if imported_date is not None:
+        return imported_date.year
+
+    transaction_date = db.scalar(
+        select(Transaction.transaction_date)
+        .where(Transaction.account_id == account_id)
+        .order_by(Transaction.created_at.desc(), Transaction.id.desc())
+        .limit(1)
+    )
+    return transaction_date.year if transaction_date is not None else None
 
 
 def _validation_errors(extracted) -> list[str]:

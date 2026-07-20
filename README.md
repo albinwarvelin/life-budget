@@ -91,6 +91,9 @@ its own migration history in `backend/alembic_type_learning/`. Run
 Description learning uses `backend/life_budget_description_learning.db` and its own migration history
 in `backend/alembic_description_learning/`. Run
 `alembic -c alembic_description_learning.ini upgrade head` after description-model schema changes.
+The backend also checks and applies pending category, type, and description model migrations before
+each model database is first used in a process. Running the commands explicitly remains useful because
+it surfaces migration problems before the API starts handling requests.
 
 ### Screenshot imports
 
@@ -108,13 +111,26 @@ limited to PNG, JPEG, or WebP files up to 15 MB and are stored below `uploads/im
 ignored by Git.
 
 The parser inverts dark screenshots, enlarges and sharpens text, runs table and sparse-text OCR passes,
-then groups columns into rows using their image coordinates. This preserves left-column merchants and
-recovers thin minus signs that OCR occasionally omits. It preserves the raw OCR text and signed source
-amount, reports per-row confidence, and flags explainable possible duplicates. Category
+then groups columns into rows using their image coordinates. It supports both merchant-first tables and
+compact date-first Nordic views. For compact views, a heading such as `Juli 2026` supplies the explicit
+year for rows such as `18. juli`. If the heading is cropped, the importer reuses the year from the
+most recent dated screenshot import for that same account, then falls back to the account's most
+recently created transaction. It never guesses from the current calendar. Amount selection prefers
+the selected account's currency over foreign conversion annotations; every draft is forced to the
+account currency while the foreign amount remains in raw OCR text. This preserves left-column
+merchants, signed outgoing amounts, unsigned positive incoming amounts, and thin minus signs that OCR
+occasionally omits. It preserves the raw OCR text and signed source amount,
+reports per-row confidence, and flags explainable possible duplicates. Category
 prediction uses the existing category model first. The separate type model then combines amount sign,
 merchant/full-word signals, low-weight amount magnitude, and the predicted category. If OCR did not
-produce a description, a third model suggests one from merchant words, category, type, currency-aware
-amount band, and previous approved descriptions. Expenses, income, and reimbursements are
+produce a description, a third model suggests one from previous approved descriptions. Its scorer
+compares each matching signal's description rate with that description's overall baseline rate, so a
+broad correlation such as `expense -> Mat` contributes little unless it is genuinely more specific
+than the model-wide bias. Merchant/category/amount interactions carry more weight than isolated type,
+category, or amount signals. Exact merchant-token interactions also carry lower-weight evidence, so
+a shared brand word such as `ICA` can connect differently named branches without treating a common
+word as strongly as the complete merchant phrase. Low-confidence results are withheld. Expenses, income, and
+reimbursements are
 stored as positive magnitudes after review; savings and transfers retain the reviewed sign.
 
 The manual-entry form requests suggestions one second after merchant, description, amount, account,
@@ -126,6 +142,9 @@ still be selected or confirmed by the user.
 Settings → Learning model opens an interactive, localized explorer. Its graph connects learned
 signals to prediction outputs. Switch it among category, transaction-type, and description models;
 each selected word, phrase, sign, category, or amount band shows its relative evidence distribution.
+The description view also contains a prediction laboratory. It sends merchant, amount, currency,
+category, and type to the real read-only prediction endpoint and displays candidate scores plus every
+conditional rate, baseline, reliability, similarity, and weighted contribution used in the result.
 
 The route handler receives the
 HTTP request, the transaction service enforces financial rules, and the repository performs the

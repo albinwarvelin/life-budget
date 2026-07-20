@@ -26,5 +26,16 @@ def list_description_patterns(db: Session, *, limit: int = 2000) -> list[Descrip
     )
 
 
+def list_description_events(db: Session, *, limit: int = 5000) -> list[DescriptionLearningEvent]:
+    """Return confirmed examples used by the explainable description scorer."""
+    return list(
+        db.scalars(
+            select(DescriptionLearningEvent)
+            .order_by(DescriptionLearningEvent.id.desc())
+            .limit(limit)
+        )
+    )
+
+
 def count_description_events(db: Session) -> int:
     return int(db.scalar(select(func.count(DescriptionLearningEvent.id))) or 0)

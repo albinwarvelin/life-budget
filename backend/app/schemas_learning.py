@@ -80,6 +80,8 @@ class ExplorerPattern(BaseModel):
     id: int
     pattern_type: str
     pattern_text: str
+    display_text: str | None = None
+    localized_display_texts: dict[str, str] = Field(default_factory=dict)
     target_key: str
     weight: float
     observations: int
@@ -92,6 +94,7 @@ class ExplorerScoringConfig(BaseModel):
     signal_weights: dict[str, float]
     similarity_threshold: float
     account_multiplier: float | None = None
+    minimum_confidence: float | None = None
 
 
 class ExplorerModelResponse(BaseModel):
@@ -100,3 +103,42 @@ class ExplorerModelResponse(BaseModel):
     patterns: list[ExplorerPattern]
     event_count: int
     scoring: ExplorerScoringConfig
+
+
+class DescriptionPredictionRequest(BaseModel):
+    """Inputs accepted by the interactive description prediction tester."""
+
+    merchant: str = Field(min_length=1, max_length=160)
+    amount: Decimal = Field(decimal_places=2)
+    currency_code: str = Field(min_length=3, max_length=3)
+    category_id: int | None = Field(default=None, ge=1)
+    transaction_type: str | None = Field(default=None, max_length=15)
+
+
+class DescriptionPredictionContributionResponse(BaseModel):
+    """One auditable term in a description candidate's calculated score."""
+
+    signal_type: str
+    signal_value: str
+    matched_value: str
+    description: str
+    observations: int
+    conditional_probability: float
+    baseline_probability: float
+    reliability: float
+    similarity: float
+    contribution: float
+
+
+class DescriptionPredictionCandidateResponse(BaseModel):
+    description: str
+    score: float
+    relative_score: float
+    contributions: list[DescriptionPredictionContributionResponse]
+
+
+class DescriptionPredictionResponse(BaseModel):
+    description: str | None
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+    candidates: list[DescriptionPredictionCandidateResponse]

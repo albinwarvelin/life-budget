@@ -9,7 +9,10 @@ from sqlalchemy.pool import StaticPool
 from app.db import Base
 from app.models import Account, Currency, ImportBatch, ImportDraftRow, Transaction
 from app.schemas_imports import ApproveImportRequest, ApprovedImportRow
-from app.services.screenshot_imports import approve_screenshot_import
+from app.services.screenshot_imports import (
+    _recent_account_import_year,
+    approve_screenshot_import,
+)
 from app.services.screenshot_parser import OCRLine, parse_signed_decimal, parse_transaction_lines
 from app.services.type_learning import learn_transaction_type, predict_transaction_type
 from app.type_learning_db import TypeLearningBase
@@ -70,6 +73,146 @@ def test_parser_recovers_a_minus_sign_omitted_by_ocr() -> None:
 
     assert row.raw_amount_text == "-37,00"
     assert row.signed_amount == Decimal("-37.00")
+
+
+def test_parser_uses_norwegian_month_header_for_compact_yearless_rows() -> None:
+    lines = [OCRLine("Juli 2026", 0.98, 8, 15, 90, 18)]
+    source_rows = [
+        ("18. juli", "Reservert: Rema Moholt T", "-189,93 kr"),
+        ("17. juli", "Travel Retail Norway AS", "18 580,62 kr"),
+        ("16. juli", "Lyse Tele AS Ice", "-95,00 kr"),
+        ("11. juli", "Easypark", "-122,11 kr"),
+    ]
+    for index, (transaction_date, merchant, amount) in enumerate(source_rows):
+        top = 60 + index * 52
+        lines.extend(
+            [
+                OCRLine(transaction_date, 0.96, 9, top, 50, 17),
+                OCRLine(merchant, 0.94, 98, top, 260, 17),
+                OCRLine(amount, 0.95, 610, top, 80, 17),
+            ]
+        )
+        if merchant == "Lyse Tele AS Ice":
+            lines.append(OCRLine("Efaktura", 0.91, 98, top + 19, 70, 14))
+        if merchant == "Easypark":
+            # This exchange-value annotation must not become another row.
+            lines.append(OCRLine("-118,06 SEK", 0.90, 615, top + 19, 78, 14))
+
+    rows = parse_transaction_lines(lines, "NOK")
+
+    assert len(rows) == 4
+    assert [row.transaction_date for row in rows] == [
+        date(2026, 7, 18),
+        date(2026, 7, 17),
+        date(2026, 7, 16),
+        date(2026, 7, 11),
+    ]
+    assert [row.merchant for row in rows] == [
+        "Rema Moholt T",
+        "Travel Retail Norway AS",
+        "Lyse Tele AS Ice",
+        "Easypark",
+    ]
+    assert [row.signed_amount for row in rows] == [
+        Decimal("-189.93"),
+        Decimal("18580.62"),
+        Decimal("-95.00"),
+        Decimal("-122.11"),
+    ]
+    assert all(row.currency_code == "NOK" for row in rows)
+
+
+def test_parser_does_not_guess_year_for_named_dates_without_a_header() -> None:
+    lines = [
+        OCRLine("18. juli", 0.96, 9, 60, 50, 17),
+        OCRLine("Rema Moholt", 0.94, 98, 60, 150, 17),
+        OCRLine("-189,93 kr", 0.95, 610, 60, 80, 17),
+    ]
+
+    assert parse_transaction_lines(lines, "NOK") == []
+
+
+def test_parser_uses_remembered_year_when_month_header_is_cropped() -> None:
+    lines = [
+        OCRLine("18. juli", 0.96, 9, 60, 50, 17),
+        OCRLine("Rema Moholt", 0.94, 98, 60, 150, 17),
+        OCRLine("-189,93 kr", 0.95, 610, 60, 80, 17),
+    ]
+
+    [row] = parse_transaction_lines(lines, "NOK", fallback_year=2026)
+
+    assert row.transaction_date == date(2026, 7, 18)
+    assert row.currency_code == "NOK"
+
+
+def test_parser_prefers_account_currency_amount_over_foreign_annotation() -> None:
+    lines = [
+        OCRLine("18. juli", 0.96, 9, 60, 50, 17),
+        OCRLine("Airbnb", 0.94, 98, 60, 150, 17),
+        OCRLine("-980,00 kr", 0.95, 540, 60, 75, 17),
+        OCRLine("-941,00 SEK", 0.93, 620, 60, 82, 17),
+    ]
+
+    [row] = parse_transaction_lines(lines, "NOK", fallback_year=2026)
+
+    assert row.signed_amount == Decimal("-980.00")
+    assert row.raw_amount_text == "-980,00"
+    assert row.currency_code == "NOK"
+    assert "-941,00 SEK" in row.raw_text
+
+
+def test_recent_import_year_is_remembered_per_account() -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    with Session(engine, expire_on_commit=False) as db:
+        db.add(Currency(code="NOK", name="Norwegian krone"))
+        account = Account(name="Everyday NOK", account_type="bank", currency_code="NOK")
+        db.add(account)
+        db.flush()
+        previous = ImportBatch(
+            original_filename="previous.png",
+            stored_path="uploads/imports/previous.png",
+            content_type="image/png",
+            account_id=account.id,
+            currency_code="NOK",
+            status="completed",
+            progress=100,
+        )
+        previous.drafts.append(
+            ImportDraftRow(
+                row_index=0,
+                raw_text="18. juli Rema -189,93 kr",
+                transaction_date=date(2026, 7, 18),
+                merchant="Rema",
+                signed_amount=Decimal("-189.93"),
+                currency_code="NOK",
+                account_id=account.id,
+                extraction_confidence=0.95,
+                validation_errors=[],
+            )
+        )
+        current = ImportBatch(
+            original_filename="current.png",
+            stored_path="uploads/imports/current.png",
+            content_type="image/png",
+            account_id=account.id,
+            currency_code="NOK",
+            status="processing",
+            progress=10,
+        )
+        db.add_all([previous, current])
+        db.commit()
+
+        assert (
+            _recent_account_import_year(
+                db,
+                account_id=account.id,
+                exclude_batch_id=current.id,
+            )
+            == 2026
+        )
 
 
 def test_type_model_learns_sign_merchant_and_predicted_category() -> None:

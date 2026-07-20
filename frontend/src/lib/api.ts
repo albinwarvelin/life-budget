@@ -97,6 +97,8 @@ export type ExplorerPattern = {
   id: number;
   pattern_type: string;
   pattern_text: string;
+  display_text: string | null;
+  localized_display_texts: Record<string, string>;
   target_key: string;
   weight: number;
   observations: number;
@@ -113,7 +115,33 @@ export type ExplorerModel = {
     signal_weights: Record<string, number>;
     similarity_threshold: number;
     account_multiplier: number | null;
+    minimum_confidence: number | null;
   };
+};
+
+export type DescriptionPredictionContribution = {
+  signal_type: string;
+  signal_value: string;
+  matched_value: string;
+  description: string;
+  observations: number;
+  conditional_probability: number;
+  baseline_probability: number;
+  reliability: number;
+  similarity: number;
+  contribution: number;
+};
+
+export type DescriptionPredictionResult = {
+  description: string | null;
+  confidence: number;
+  reason: string;
+  candidates: {
+    description: string;
+    score: number;
+    relative_score: number;
+    contributions: DescriptionPredictionContribution[];
+  }[];
 };
 
 export type ImportDraft = {
@@ -203,6 +231,17 @@ export const api = {
     request<LearningModel>("/api/v1/category-learning/model"),
   getExplorerModel: (kind: LearningModelKind) =>
     request<ExplorerModel>(`/api/v1/learning-models/${kind}`),
+  testDescriptionPrediction: (input: {
+    merchant: string;
+    amount: string;
+    currency_code: string;
+    category_id?: number;
+    transaction_type?: Transaction["transaction_type"];
+  }) =>
+    request<DescriptionPredictionResult>("/api/v1/learning-models/description/predict", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   suggestCategories: (input: {
     merchant: string;
     description?: string;

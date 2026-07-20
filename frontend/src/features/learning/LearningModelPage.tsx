@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api, ExplorerModel, LearningModelKind, Transaction } from "../../lib/api";
 import { calculateTargetProbabilities } from "../../lib/learning-model";
 import { useI18n } from "../../lib/i18n";
+import { DescriptionPredictionTester } from "./DescriptionPredictionTester";
 
 const palette = ["#2e6b5a", "#a86d32", "#5573a5", "#9a5274", "#6c7d32", "#7357a6"];
 const transactionTypes: Transaction["transaction_type"][] = [
@@ -23,7 +24,7 @@ const copy = {
     noConnections: "No connections match these filters.", evidence: "Evidence distribution",
     choosePhrase: "Choose a signal in the map to inspect its output probabilities.", weight: "weight",
     seen: "observations", notCalibrated: "These are relative stored evidence scores, not calibrated real-world probabilities.",
-    scoring: "Scoring weights", fuzzy: "Fuzzy threshold", accountBoost: "Same-account multiplier",
+    scoring: "Scoring weights", fuzzy: "Fuzzy threshold", accountBoost: "Same-account multiplier", minimumConfidence: "Minimum suggestion confidence",
     loading: "Loading model…", model: "Prediction model",
   },
   sv: {
@@ -37,12 +38,12 @@ const copy = {
     noConnections: "Inga kopplingar matchar filtren.", evidence: "Bevisfördelning",
     choosePhrase: "Välj en signal i kartan för att se sannolikheterna för dess resultat.", weight: "vikt",
     seen: "observationer", notCalibrated: "Detta är relativa bevispoäng, inte kalibrerade verkliga sannolikheter.",
-    scoring: "Poängvikter", fuzzy: "Tröskel för ungefärlig matchning", accountBoost: "Multiplikator för samma konto",
+    scoring: "Poängvikter", fuzzy: "Tröskel för ungefärlig matchning", accountBoost: "Multiplikator för samma konto", minimumConfidence: "Minsta förslagskonfidens",
     loading: "Läser modellen…", model: "Prediktionsmodell",
   },
 } as const;
 
-type PhraseNode = { key: string; type: string; text: string; weight: number };
+type PhraseNode = { key: string; type: string; patternText: string; text: string; weight: number };
 
 export function LearningModelPage() {
   const { locale } = useI18n();
@@ -53,6 +54,7 @@ export function LearningModelPage() {
     queryFn: () => api.getExplorerModel(modelKind),
   });
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: api.listAccounts });
+  const categories = useQuery({ queryKey: ["categories"], queryFn: api.listCategories });
   const [search, setSearch] = useState("");
   const [signal, setSignal] = useState("all");
   const [accountScope, setAccountScope] = useState("all");
@@ -68,20 +70,22 @@ export function LearningModelPage() {
   const filteredPatterns = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return (model.data?.patterns ?? []).filter((pattern) =>
-      (!needle || pattern.pattern_text.toLocaleLowerCase().includes(needle)) &&
+      (!needle || pattern.pattern_text.toLocaleLowerCase().includes(needle) ||
+        (pattern.localized_display_texts?.[locale] ?? pattern.display_text ?? "").toLocaleLowerCase().includes(needle)) &&
       (signal === "all" || pattern.pattern_type === signal) &&
       (modelKind !== "category" || accountScope === "all" ||
         (accountScope === "global" ? pattern.account_id === null : pattern.account_id === Number(accountScope))) &&
       (modelKind !== "category" || transactionType === "all" || pattern.transaction_type === transactionType) &&
       pattern.observations >= minimumObservations,
     );
-  }, [model.data, search, signal, modelKind, accountScope, transactionType, minimumObservations]);
+  }, [model.data, search, signal, modelKind, accountScope, transactionType, minimumObservations, locale]);
 
   const graph = useMemo(() => {
     const totals = new Map<string, PhraseNode>();
     for (const pattern of filteredPatterns) {
       const key = `${pattern.pattern_type}:${pattern.pattern_text}`;
-      const node = totals.get(key) ?? { key, type: pattern.pattern_type, text: pattern.pattern_text, weight: 0 };
+      const displayText = pattern.localized_display_texts?.[locale] ?? pattern.display_text ?? pattern.pattern_text;
+      const node = totals.get(key) ?? { key, type: pattern.pattern_type, patternText: pattern.pattern_text, text: displayText, weight: 0 };
       node.weight += pattern.weight;
       totals.set(key, node);
     }
@@ -90,7 +94,7 @@ export function LearningModelPage() {
     const edges = filteredPatterns.filter((pattern) => keys.has(`${pattern.pattern_type}:${pattern.pattern_text}`)).slice(0, 100);
     const targetKeys = [...new Set(edges.map((pattern) => pattern.target_key))];
     return { phrases, edges, targetKeys };
-  }, [filteredPatterns]);
+  }, [filteredPatterns, locale]);
 
   useEffect(() => {
     if (selectedPhrase && !graph.phrases.some((phrase) => phrase.key === selectedPhrase)) {
@@ -109,7 +113,7 @@ export function LearningModelPage() {
   };
   const selectedNode = graph.phrases.find((phrase) => phrase.key === selectedPhrase);
   const evidence = selectedNode
-    ? calculateTargetProbabilities(filteredPatterns, selectedNode.type, selectedNode.text)
+    ? calculateTargetProbabilities(filteredPatterns, selectedNode.type, selectedNode.patternText)
     : [];
   const signalTypes = [...new Set(data.patterns.map((pattern) => pattern.pattern_type))].sort();
   const uniquePhraseCount = new Set(data.patterns.map((pattern) => `${pattern.pattern_type}:${pattern.pattern_text}`)).size;
@@ -135,6 +139,8 @@ export function LearningModelPage() {
         <div className="card overflow-hidden p-5" key={label}><p className="text-xs font-bold uppercase tracking-[.12em] text-[#668277]">{label}</p><strong className="mt-2 block text-3xl text-forest">{value}</strong></div>)}
     </div>
 
+    {modelKind === "description" && <DescriptionPredictionTester categories={categories.data ?? []} locale={locale} />}
+
     <section className="card overflow-hidden">
       <div className="border-b border-[#e2ebe4] bg-gradient-to-r from-[#f6fbf6] to-white p-6">
         <p className="eyebrow">{c[modelKind]}</p><h2>{c.map}</h2><p className="page-subtitle">{c.mapHint}</p>
@@ -158,7 +164,8 @@ export function LearningModelPage() {
                 const left = graph.phrases.findIndex((phrase) => phrase.key === key);
                 const right = graph.targetKeys.indexOf(edge.target_key);
                 const focused = !selectedPhrase || selectedPhrase === key;
-                return <path key={edge.id} d={`M 285 ${phraseY(left)} C 470 ${phraseY(left)}, 530 ${targetY(right)}, 715 ${targetY(right)}`} fill="none" stroke={palette[right % palette.length]} strokeWidth={Math.min(8, 1 + Math.sqrt(edge.weight))} opacity={focused ? .62 : .07} className="cursor-pointer transition-opacity" onClick={() => setSelectedPhrase(key)}><title>{`${edge.pattern_text} → ${targetName(edge.target_key)} · ${edge.weight.toFixed(2)}`}</title></path>;
+                const edgeLabel = edge.localized_display_texts?.[locale] ?? edge.display_text ?? edge.pattern_text;
+                return <path key={edge.id} d={`M 285 ${phraseY(left)} C 470 ${phraseY(left)}, 530 ${targetY(right)}, 715 ${targetY(right)}`} fill="none" stroke={palette[right % palette.length]} strokeWidth={Math.min(8, 1 + Math.sqrt(edge.weight))} opacity={focused ? .62 : .07} className="cursor-pointer transition-opacity" onClick={() => setSelectedPhrase(key)}><title>{`${edgeLabel} → ${targetName(edge.target_key)} · ${edge.weight.toFixed(2)}`}</title></path>;
               })}
               {graph.phrases.map((phrase, index) => {
                 const selected = phrase.key === selectedPhrase;
@@ -199,6 +206,6 @@ function shorten(value: string, length: number) {
 function ScoringCard({ model, text }: { model: ExplorerModel; text: typeof copy.en | typeof copy.sv }) {
   return <section className="card p-6"><p className="eyebrow">{text[model.model_kind]}</p><h2>{text.scoring}</h2>
     <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(model.scoring.signal_weights).map(([key, value]) => <div className="flex items-center justify-between rounded-xl bg-[#f4f8f4] px-4 py-3" key={key}><code className="text-xs text-[#45655a]">{key}</code><strong>{value.toFixed(2)}×</strong></div>)}</div>
-    <div className="mt-5 flex flex-wrap gap-3"><div className="rounded-xl bg-[#e9f2eb] p-4 text-forest"><small className="block">{text.fuzzy}</small><strong className="mt-1 block text-2xl">{Math.round(model.scoring.similarity_threshold * 100)}%</strong></div>{model.scoring.account_multiplier && <div className="rounded-xl bg-[#173a32] p-4 text-white"><small className="block text-[#b7d8c5]">{text.accountBoost}</small><strong className="mt-1 block text-2xl">{model.scoring.account_multiplier.toFixed(2)}×</strong></div>}</div>
+    <div className="mt-5 flex flex-wrap gap-3"><div className="rounded-xl bg-[#e9f2eb] p-4 text-forest"><small className="block">{text.fuzzy}</small><strong className="mt-1 block text-2xl">{Math.round(model.scoring.similarity_threshold * 100)}%</strong></div>{model.scoring.minimum_confidence !== null && <div className="rounded-xl bg-[#e9f2eb] p-4 text-forest"><small className="block">{text.minimumConfidence}</small><strong className="mt-1 block text-2xl">{Math.round(model.scoring.minimum_confidence * 100)}%</strong></div>}{model.scoring.account_multiplier && <div className="rounded-xl bg-[#173a32] p-4 text-white"><small className="block text-[#b7d8c5]">{text.accountBoost}</small><strong className="mt-1 block text-2xl">{model.scoring.account_multiplier.toFixed(2)}×</strong></div>}</div>
   </section>;
 }

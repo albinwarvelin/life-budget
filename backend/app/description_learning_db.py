@@ -1,9 +1,10 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+from app.migration_runner import upgrade_database_to_head
 
 
 class DescriptionLearningBase(DeclarativeBase):
@@ -22,28 +23,16 @@ description_learning_engine = create_engine(
 DescriptionLearningSessionLocal = sessionmaker(
     bind=description_learning_engine, autoflush=False, expire_on_commit=False
 )
+_schema_ready = False
 
 
 def ensure_description_learning_schema() -> None:
-    """Bootstrap a new model store while preserving an Alembic upgrade path."""
-    from app.description_learning_models import (  # noqa: F401
-        DescriptionLearningEvent,
-        DescriptionPattern,
-    )
-
-    if "alembic_version" in inspect(description_learning_engine).get_table_names():
+    """Upgrade the description learner once before its first use in this process."""
+    global _schema_ready
+    if _schema_ready:
         return
-    DescriptionLearningBase.metadata.create_all(description_learning_engine)
-    with description_learning_engine.begin() as connection:
-        connection.execute(
-            text(
-                "CREATE TABLE IF NOT EXISTS alembic_version "
-                "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-            )
-        )
-        connection.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES ('0001_description_learning')")
-        )
+    upgrade_database_to_head("alembic_description_learning.ini")
+    _schema_ready = True
 
 
 def get_description_learning_db() -> Generator[Session, None, None]:

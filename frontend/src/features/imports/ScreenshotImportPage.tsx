@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, ClipboardEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api, Transaction } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { EditableImportRow, toApprovalRows, toEditableImportRow } from "./import-review";
+import { getClipboardImage } from "./clipboard-image";
 
 const transactionTypes: Transaction["transaction_type"][] = [
   "expense", "income", "reimbursement", "savings", "transfer",
@@ -13,14 +14,14 @@ const transactionTypes: Transaction["transaction_type"][] = [
 const copy = {
   en: {
     eyebrow: "Screenshot import", title: "Import a transaction list", subtitle: "Your screenshot stays local. Nothing is saved as a transaction before review.",
-    choose: "Choose screenshot", account: "Account", imageReady: "Is this image clear and complete?", imageHint: "Check that dates, merchant text and every amount are visible before parsing.",
+    choose: "Choose screenshot", pasteHint: "You can also paste an image here with Ctrl+V.", account: "Account", imageReady: "Is this image clear and complete?", imageHint: "Check that dates, merchant text and every amount are visible before parsing.",
     replace: "Choose another", parse: "Confirm and parse", back: "Back to transactions", working: "Reading transaction rows", workingHint: "Recognizing text, separating rows and running both prediction models.",
     review: "Review extracted transactions", reviewHint: "Correct uncertain fields, add notes, reject unwanted rows, then approve.", accept: "Include", date: "Date", merchant: "Merchant", info: "Description", amount: "Signed source amount", type: "Type", category: "Category", notes: "Notes", optional: "Optional",
     source: "OCR source", extraction: "OCR", categoryConfidence: "Category", typeConfidence: "Type", descriptionConfidence: "Description", duplicate: "Possible duplicate", uncategorized: "Uncategorized", approve: "Approve selected transactions", approving: "Saving…", cancel: "Cancel", complete: "Import completed", completeHint: "Accepted rows were saved and all prediction models learned from your corrections.", noRows: "No rows were extracted.", selectAccount: "Select an account first.", imageTypes: "PNG, JPEG or WebP, maximum 15 MB.", rejected: "Exclude this row", storedSign: "Expenses, income and reimbursements are stored as positive magnitudes. Savings and transfers keep this sign.",
   },
   sv: {
     eyebrow: "Skärmbildsimport", title: "Importera en transaktionslista", subtitle: "Skärmbilden stannar lokalt. Inget sparas som transaktion före granskning.",
-    choose: "Välj skärmbild", account: "Konto", imageReady: "Är bilden tydlig och komplett?", imageHint: "Kontrollera att datum, handlartext och alla belopp syns innan tolkning.",
+    choose: "Välj skärmbild", pasteHint: "Du kan även klistra in en bild här med Ctrl+V.", account: "Konto", imageReady: "Är bilden tydlig och komplett?", imageHint: "Kontrollera att datum, handlartext och alla belopp syns innan tolkning.",
     replace: "Välj en annan", parse: "Bekräfta och tolka", back: "Tillbaka till transaktioner", working: "Läser transaktionsrader", workingHint: "Känner igen text, delar upp rader och kör båda prediktionsmodellerna.",
     review: "Granska tolkade transaktioner", reviewHint: "Rätta osäkra fält, lägg till anteckningar, avvisa oönskade rader och godkänn sedan.", accept: "Inkludera", date: "Datum", merchant: "Handlare", info: "Beskrivning", amount: "Signerat källbelopp", type: "Typ", category: "Kategori", notes: "Anteckningar", optional: "Valfritt",
     source: "OCR-källa", extraction: "OCR", categoryConfidence: "Kategori", typeConfidence: "Typ", descriptionConfidence: "Beskrivning", duplicate: "Möjlig dubblett", uncategorized: "Okategoriserad", approve: "Godkänn valda transaktioner", approving: "Sparar…", cancel: "Avbryt", complete: "Importen är klar", completeHint: "Godkända rader sparades och alla prediktionsmodeller lärde sig av dina rättelser.", noRows: "Inga rader kunde tolkas.", selectAccount: "Välj ett konto först.", imageTypes: "PNG, JPEG eller WebP, högst 15 MB.", rejected: "Uteslut den här raden", storedSign: "Utgifter, inkomster och återbetalningar sparas som positiva belopp. Sparande och överföringar behåller tecknet.",
@@ -68,16 +69,25 @@ export function ScreenshotImportPage() {
   const currentImage = batchId ? api.importImageUrl(batchId) : imageUrl;
 
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0] ?? null;
+    selectFile(event.target.files?.[0] ?? null);
+  }
+  function selectFile(next: File | null) {
     if (imageUrl?.startsWith("blob:")) URL.revokeObjectURL(imageUrl);
     setFile(next); setBatchId(null); setRows([]); setFinishedCount(null);
     setImageUrl(next ? URL.createObjectURL(next) : null);
   }
+  function pasteImage(event: ClipboardEvent<HTMLElement>) {
+    const pasted = getClipboardImage(event.clipboardData.items);
+    if (!pasted) return;
+    event.preventDefault();
+    const extension = pasted.type.split("/")[1] || "png";
+    selectFile(new File([pasted], `pasted-screenshot.${extension}`, { type: pasted.type }));
+  }
   function updateRow(id: number, changes: Partial<EditableImportRow>) { setRows((current) => current.map((row) => row.draft_id === id ? { ...row, ...changes } : row)); }
 
   return <div className="space-y-6"><header className="flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">{c.eyebrow}</p><h1>{c.title}</h1><p className="page-subtitle">{c.subtitle}</p></div><Link className="secondary-button no-underline" to="/transactions">← {c.back}</Link></header>
-    {!batchId && <section className="card grid gap-6 p-6 lg:grid-cols-[360px_1fr]">
-      <div className="space-y-4"><label>{c.account}<select value={accountId} onChange={(event) => setAccountId(Number(event.target.value))}>{accounts.data?.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.currency_code}</option>)}</select></label><label className="flex cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-[#b9d0c0] bg-[#f5faf6] p-8 text-center text-sm font-bold text-forest hover:bg-[#edf6ef]"><input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseFile} />{file ? c.replace : `＋ ${c.choose}`}</label><p className="text-xs text-muted">{c.imageTypes}</p></div>
+    {!batchId && <section className="card grid gap-6 p-6 lg:grid-cols-[360px_1fr]" onPaste={pasteImage} tabIndex={0} aria-label={c.choose}>
+      <div className="space-y-4"><label>{c.account}<select value={accountId} onChange={(event) => setAccountId(Number(event.target.value))}>{accounts.data?.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.currency_code}</option>)}</select></label><label className="flex cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-[#b9d0c0] bg-[#f5faf6] p-8 text-center text-sm font-bold text-forest hover:bg-[#edf6ef]"><input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseFile} />{file ? c.replace : `＋ ${c.choose}`}</label><p className="text-xs text-muted">{c.imageTypes} {c.pasteHint}</p></div>
       <div className="min-h-72 overflow-hidden rounded-2xl border border-[#dce8df] bg-[#eef3ef]">{imageUrl ? <img className="h-full max-h-[520px] w-full object-contain" src={imageUrl} alt={file?.name ?? c.choose} /> : <div className="grid h-full min-h-72 place-items-center text-sm text-muted">{c.choose}</div>}</div>
       {file && <div className="lg:col-span-2 flex flex-wrap items-center justify-between gap-4 rounded-xl bg-[#f5f9f5] p-5"><div><strong className="block text-forest">{c.imageReady}</strong><p className="mb-0 text-sm text-muted">{c.imageHint}</p></div><button className="primary-button" disabled={!accountId || upload.isPending} onClick={() => upload.mutate()}>{upload.isPending ? c.working : c.parse}</button></div>}
       {upload.isError && <div className="alert error-alert lg:col-span-2">{(upload.error as Error).message}</div>}

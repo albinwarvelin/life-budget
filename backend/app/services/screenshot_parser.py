@@ -21,6 +21,46 @@ DATE_PATTERNS = (
         r"\b(?P<day>0?[1-9]|[12]\d|3[01])[-/.](?P<month>0?[1-9]|1[0-2])[-/.](?P<year>20\d{2})\b"
     ),
 )
+
+# Compact Nordic bank views commonly put the year in a month heading and show
+# only a localized day/month value on each transaction row. Keep this mapping
+# explicit so importing a screenshot never depends on the computer's locale.
+MONTH_NAMES = {
+    "januar": 1,
+    "january": 1,
+    "januari": 1,
+    "februar": 2,
+    "february": 2,
+    "februari": 2,
+    "mars": 3,
+    "march": 3,
+    "april": 4,
+    "mai": 5,
+    "may": 5,
+    "maj": 5,
+    "juni": 6,
+    "june": 6,
+    "juli": 7,
+    "july": 7,
+    "august": 8,
+    "augusti": 8,
+    "september": 9,
+    "oktober": 10,
+    "october": 10,
+    "november": 11,
+    "desember": 12,
+    "december": 12,
+}
+_MONTH_ALTERNATION = "|".join(sorted(MONTH_NAMES, key=len, reverse=True))
+MONTH_YEAR_PATTERN = re.compile(
+    rf"\b(?P<month_name>{_MONTH_ALTERNATION})\s+(?P<year>20\d{{2}})\b",
+    re.IGNORECASE,
+)
+NAMED_DATE_PATTERN = re.compile(
+    rf"\b(?P<day>0?[1-9]|[12]\d|3[01])\.?\s+"
+    rf"(?P<month_name>{_MONTH_ALTERNATION})\b",
+    re.IGNORECASE,
+)
 # OCR engines use several dash glyphs for a bank-statement minus sign. A
 # detached sign may also be separated from its number by whitespace.
 AMOUNT_PATTERN = re.compile(
@@ -64,7 +104,12 @@ class ExtractedTransactionRow:
 class TesseractScreenshotParser:
     """Local OCR adapter optimized for repeated bank-statement table rows."""
 
-    def parse(self, image_path: Path, default_currency: str) -> list[ExtractedTransactionRow]:
+    def parse(
+        self,
+        image_path: Path,
+        default_currency: str,
+        fallback_year: int | None = None,
+    ) -> list[ExtractedTransactionRow]:
         settings = get_settings()
         tesseract_command = resolve_tesseract_command(settings.tesseract_command)
         try:
@@ -88,7 +133,10 @@ class TesseractScreenshotParser:
                     with Image.open(prepared_path) as prepared_image:
                         candidates.append(
                             parse_transaction_lines(
-                                lines, default_currency, prepared_image.convert("L")
+                                lines,
+                                default_currency,
+                                prepared_image.convert("L"),
+                                fallback_year=fallback_year,
                             )
                         )
         except FileNotFoundError as error:
@@ -235,20 +283,30 @@ def parse_transaction_lines(
     lines: list[OCRLine],
     default_currency: str,
     image: Image.Image | None = None,
+    *,
+    fallback_year: int | None = None,
 ) -> list[ExtractedTransactionRow]:
-    """Extract each transaction from geometry-clustered four-column table rows."""
+    """Extract transactions from full tables and compact localized month views."""
     rows: list[ExtractedTransactionRow] = []
     seen: set[tuple[date, Decimal, str]] = set()
-    for fragments in _transaction_row_candidates(cluster_visual_rows(lines)):
+    visual_rows = cluster_visual_rows(lines)
+    month_headers = _month_year_headers(visual_rows)
+    for fragments in _transaction_row_candidates(visual_rows):
         row_text = "   ".join(fragment.text for fragment in fragments)
-        date_matches = _all_date_matches(row_text)
+        row_top = min(fragment.top for fragment in fragments)
+        inferred_year = _preceding_header_year(month_headers, row_top) or fallback_year
+        date_matches = _all_date_matches(row_text, inferred_year=inferred_year)
         amount_matches = list(AMOUNT_PATTERN.finditer(row_text))
         if not date_matches or not amount_matches:
             continue
         parsed_date, first_date_match = date_matches[0]
-        amount_match = amount_matches[-1]
+        amount_match = _account_currency_amount_match(amount_matches, default_currency)
         raw_amount = amount_match.group("amount").strip()
-        amount_fragment = _fragment_containing_amount(fragments)
+        amount_fragment = _fragment_containing_amount(
+            fragments,
+            raw_amount=raw_amount,
+            currency_hint=amount_match.group("currency") or "",
+        )
         signed_amount = parse_signed_decimal(raw_amount)
         if (
             signed_amount is not None
@@ -260,14 +318,23 @@ def parse_transaction_lines(
             signed_amount = -abs(signed_amount)
             raw_amount = f"-{raw_amount}"
 
-        merchant_text = row_text[: first_date_match.start()]
-        merchant = _clean_text(merchant_text)[:160] or None
+        before_date = _clean_text(row_text[: first_date_match.start()])
         between_dates_and_amount = row_text[first_date_match.end() : amount_match.start()]
         for _, match in date_matches[1:]:
             between_dates_and_amount = between_dates_and_amount.replace(match.group(0), "", 1)
-        description = _clean_text(between_dates_and_amount)[:240] or None
-        currency_hint = (amount_match.group("currency") or "").upper()
-        currency = currency_hint if currency_hint in {"SEK", "NOK"} else default_currency.upper()
+        between_text = _clean_text(between_dates_and_amount)
+        if before_date:
+            # Desktop statements put merchant before one or more date columns.
+            merchant = _clean_merchant(before_date)[:160] or None
+            description = between_text[:240] or None
+        else:
+            # Compact views put date first, making the text before amount the merchant.
+            merchant = _clean_merchant(between_text)[:160] or None
+            description = None
+        # The screenshot belongs to the selected account. Foreign-currency
+        # annotations are useful raw OCR context but must never change the
+        # transaction currency persisted for that account.
+        currency = default_currency.upper()
         if signed_amount is None:
             continue
         identity = (parsed_date, signed_amount, merchant or "")
@@ -297,7 +364,7 @@ def _transaction_row_candidates(visual_rows: list[list[OCRLine]]) -> list[list[O
         text = " ".join(fragment.text for fragment in fragments)
         if not AMOUNT_PATTERN.search(text):
             continue
-        if _all_date_matches(text):
+        if _contains_date_text(text):
             candidates.append(fragments)
             continue
         # Some mobile layouts wrap the amount or extra information underneath
@@ -314,7 +381,7 @@ def _transaction_row_candidates(visual_rows: list[list[OCRLine]]) -> list[list[O
                 max(fragment.height for fragment in previous),
             )
             if (
-                _all_date_matches(previous_text)
+                _contains_date_text(previous_text)
                 and not AMOUNT_PATTERN.search(previous_text)
                 and vertical_gap <= typical_height * 1.5
             ):
@@ -322,7 +389,9 @@ def _transaction_row_candidates(visual_rows: list[list[OCRLine]]) -> list[list[O
     return candidates
 
 
-def _all_date_matches(value: str) -> list[tuple[date, re.Match[str]]]:
+def _all_date_matches(
+    value: str, *, inferred_year: int | None = None
+) -> list[tuple[date, re.Match[str]]]:
     matches: list[tuple[date, re.Match[str]]] = []
     occupied: set[tuple[int, int]] = set()
     for pattern in DATE_PATTERNS:
@@ -339,11 +408,74 @@ def _all_date_matches(value: str) -> list[tuple[date, re.Match[str]]]:
                 continue
             occupied.add(match.span())
             matches.append((parsed, match))
+    # A named date is safe only when an explicit year was read from the image.
+    # Never substitute the current year for persisted financial data.
+    if inferred_year is not None:
+        for match in NAMED_DATE_PATTERN.finditer(value):
+            if match.span() in occupied:
+                continue
+            month = MONTH_NAMES[match.group("month_name").lower()]
+            try:
+                parsed = date(inferred_year, month, int(match.group("day")))
+            except ValueError:
+                continue
+            occupied.add(match.span())
+            matches.append((parsed, match))
     return sorted(matches, key=lambda item: item[1].start())
 
 
-def _fragment_containing_amount(fragments: list[OCRLine]) -> OCRLine | None:
-    candidates = [fragment for fragment in fragments if AMOUNT_PATTERN.search(fragment.text)]
+def _contains_date_text(value: str) -> bool:
+    """Recognize both complete dates and localized dates that need a header year."""
+    return bool(_all_date_matches(value) or NAMED_DATE_PATTERN.search(value))
+
+
+def _month_year_headers(visual_rows: list[list[OCRLine]]) -> list[tuple[int, int]]:
+    """Collect vertical positions and years from headings such as ``Juli 2026``."""
+    headers: list[tuple[int, int]] = []
+    for fragments in visual_rows:
+        text = " ".join(fragment.text for fragment in fragments)
+        match = MONTH_YEAR_PATTERN.search(text)
+        if match:
+            headers.append((min(fragment.top for fragment in fragments), int(match.group("year"))))
+    return sorted(headers)
+
+
+def _preceding_header_year(headers: list[tuple[int, int]], row_top: int) -> int | None:
+    """Use the nearest explicit month heading above a compact transaction row."""
+    return next((year for top, year in reversed(headers) if top < row_top), None)
+
+
+def _account_currency_amount_match(
+    matches: list[re.Match[str]], default_currency: str
+) -> re.Match[str]:
+    """Prefer the booked account-currency amount over conversion annotations."""
+    account_currency = default_currency.upper()
+
+    def priority(index_and_match: tuple[int, re.Match[str]]) -> tuple[int, int]:
+        index, match = index_and_match
+        currency = (match.group("currency") or "").upper()
+        if currency == account_currency:
+            return 3, index
+        if currency in {"", "KR", ":-"}:
+            return 2, index
+        return 0, index
+
+    return max(enumerate(matches), key=priority)[1]
+
+
+def _fragment_containing_amount(
+    fragments: list[OCRLine], *, raw_amount: str, currency_hint: str
+) -> OCRLine | None:
+    """Find the OCR fragment for the selected amount, not a foreign annotation."""
+    normalized_currency = currency_hint.upper()
+    candidates = []
+    for fragment in fragments:
+        for match in AMOUNT_PATTERN.finditer(fragment.text):
+            if match.group("amount").strip() != raw_amount:
+                continue
+            if (match.group("currency") or "").upper() != normalized_currency:
+                continue
+            candidates.append(fragment)
     return max(candidates, key=lambda fragment: fragment.left, default=None)
 
 
@@ -387,6 +519,12 @@ def parse_signed_decimal(value: str) -> Decimal | None:
 def _clean_text(value: str) -> str:
     value = re.sub(r"\b(?:SEK|NOK|kr)\b|:-", "", value, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", value).strip(" -|·")
+
+
+def _clean_merchant(value: str) -> str:
+    """Remove a compact-view status prefix without changing merchant identity."""
+    value = re.sub(r"^reservert\s*:\s*", "", value, flags=re.IGNORECASE)
+    return _clean_text(value)
 
 
 def _weighted_confidence(lines: list[OCRLine]) -> float:

@@ -19,15 +19,15 @@
 
 @layer components {
   .app-shell { @apply min-h-screen; }
-  .sidebar { @apply sticky top-0 z-20 flex min-h-[72px] items-center gap-8 bg-forest px-[1.5rem] py-3 text-[#eaf1e9] shadow-md; }
+.sidebar { @apply sticky top-0 z-20 flex min-h-[72px] items-center gap-6 bg-forest px-[1.5rem] py-3 text-[#eaf1e9] shadow-md; }
   .brand { @apply flex items-center gap-3 text-[1.05rem] font-bold tracking-tight no-underline; }
   .brand-mark { @apply inline-flex h-[31px] w-[31px] items-center justify-center rounded-[9px] bg-sage text-[.7rem] font-extrabold text-forest; }
   .nav-list { @apply flex items-center gap-2; }
   .nav-link { @apply flex items-center gap-3 rounded-[9px] px-3 py-3 text-[.92rem] text-[#aebfb7] transition-colors; }
   .nav-link:hover, .nav-link.active { @apply bg-[#295548] text-white; }
   .nav-link span { @apply text-[1.1rem] opacity-80; }
-  .sidebar-bottom { @apply contents; }
-  .sidebar-note { @apply ml-auto p-2 text-xs text-[#b7c9c0]; }
+.sidebar-bottom { @apply ml-auto flex items-center gap-2; }
+.sidebar-note { @apply ml-4 p-2 text-xs text-[#b7c9c0]; }
   .sidebar-note small { @apply mt-1 ml-4 block text-[#78978b]; }
   .status-dot { @apply mr-2 inline-block h-2 w-2 rounded-full bg-sage; }
   .main-content { @apply mx-auto w-full max-w-[1400px] px-[4.5rem] py-[3.2rem]; }
@@ -78,3 +78,4 @@
 
 @media (max-width: 800px) { .sidebar { @apply gap-3 overflow-x-auto px-3; }.brand > span:not(.brand-mark) { @apply hidden; }.nav-link { @apply whitespace-nowrap px-2; }.sidebar-note { @apply hidden; }.main-content { @apply p-8; }.page-header { @apply gap-4; }.page-header .primary-button { @apply p-3 text-[0]; }.page-header .primary-button:first-letter { @apply text-xl; }.two-column { @apply grid-cols-1; }.summary-grid { @apply grid-cols-2; }.monthly-metrics { @apply ml-0; } }
 @media (max-width: 520px) { .page-header { @apply block; }.page-header .primary-button { @apply mt-5; }.toolbar { @apply flex-wrap items-stretch; }.result-count { @apply ml-0 w-full pb-0; }.form-grid { @apply grid-cols-1; }.form-grid .wide { @apply col-auto; }.modal { @apply p-4; }.summary-strip { @apply grid-cols-1; }.summary-grid { @apply grid-cols-2; }.locale-options { @apply flex-col; }.locale-option { @apply justify-between; }.month-picker-button { @apply max-w-36 truncate; } }
+@media (max-width: 800px) { .sidebar-bottom { @apply ml-0; } }
