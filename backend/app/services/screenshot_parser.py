@@ -34,6 +34,10 @@ MONTH_NAMES = {
     "februari": 2,
     "mars": 3,
     "march": 3,
+    # Norwegian bank statements commonly abbreviate April as ``apr.``. Keep
+    # the alias without punctuation because the date expression accepts both
+    # the dotted and undotted OCR result.
+    "apr": 4,
     "april": 4,
     "mai": 5,
     "may": 5,
@@ -58,7 +62,10 @@ MONTH_YEAR_PATTERN = re.compile(
 )
 NAMED_DATE_PATTERN = re.compile(
     rf"\b(?P<day>0?[1-9]|[12]\d|3[01])\.?\s+"
-    rf"(?P<month_name>{_MONTH_ALTERNATION})\b",
+    # Put the word boundary before the optional period. A boundary after the
+    # period would fail because both the period and following space are
+    # non-word characters. Consuming it also keeps ``.`` out of the merchant.
+    rf"(?P<month_name>{_MONTH_ALTERNATION})\b\.?",
     re.IGNORECASE,
 )
 # OCR engines use several dash glyphs for a bank-statement minus sign. A
@@ -329,7 +336,10 @@ def parse_transaction_lines(
             description = between_text[:240] or None
         else:
             # Compact views put date first, making the text before amount the merchant.
-            merchant = _clean_merchant(between_text)[:160] or None
+            # Pass the uncleaned slice so merchant-specific cleanup can still
+            # recognize a leading currency label before generic text cleanup
+            # removes that label.
+            merchant = _clean_merchant(between_dates_and_amount)[:160] or None
             description = None
         # The screenshot belongs to the selected account. Foreign-currency
         # annotations are useful raw OCR context but must never change the
@@ -523,7 +533,22 @@ def _clean_text(value: str) -> str:
 
 def _clean_merchant(value: str) -> str:
     """Remove a compact-view status prefix without changing merchant identity."""
+    # Column separators leave leading whitespace when this function receives a
+    # raw date-to-amount slice rather than already normalized text.
+    value = value.lstrip()
     value = re.sub(r"^reservert\s*:\s*", "", value, flags=re.IGNORECASE)
+    # Some compact statements repeat a source amount before the actual
+    # merchant (for example ``Nok 957,00 Zalando Payments G``). Restrict this
+    # cleanup to a leading currency plus decimal amount so ordinary numbers in
+    # merchant names remain untouched. The complete OCR text is still retained
+    # on the draft row for review and auditing.
+    value = re.sub(
+        r"^\s*(?:SEK|NOK|kr)\s+[+\-]?\s*"
+        r"(?:\d{1,3}(?:[ .]\d{3})+|\d+)[,.]\d{2}\s+",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     return _clean_text(value)
 
 

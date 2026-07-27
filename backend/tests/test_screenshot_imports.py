@@ -122,6 +122,44 @@ def test_parser_uses_norwegian_month_header_for_compact_yearless_rows() -> None:
     assert all(row.currency_code == "NOK" for row in rows)
 
 
+def test_parser_reads_abbreviated_april_dates_in_compact_bank_view() -> None:
+    """The Norwegian ``apr.`` abbreviation must inherit April from its heading."""
+    lines = [OCRLine("April 2026", 0.98, 10, 15, 95, 18)]
+    source_rows = [
+        ("29. apr.", "Nok 957,00 Zalando Payments G", "-957,00 kr"),
+        ("28. apr.", "REMA", "-219,32 kr"),
+        ("25. apr.", "Vegard Gulbrandsen", "530,00 kr"),
+        ("23. apr.", "Mats Eidsmo", "50,00 kr"),
+    ]
+    for index, (transaction_date, merchant, amount) in enumerate(source_rows):
+        top = 60 + index * 51
+        lines.extend(
+            [
+                OCRLine(transaction_date, 0.96, 24, top, 60, 17),
+                OCRLine(merchant, 0.94, 116, top, 300, 17),
+                OCRLine(amount, 0.95, 665, top, 78, 17),
+            ]
+        )
+
+    rows = parse_transaction_lines(lines, "NOK")
+
+    assert [row.transaction_date for row in rows] == [
+        date(2026, 4, 29),
+        date(2026, 4, 28),
+        date(2026, 4, 25),
+        date(2026, 4, 23),
+    ]
+    assert [row.signed_amount for row in rows] == [
+        Decimal("-957.00"),
+        Decimal("-219.32"),
+        Decimal("530.00"),
+        Decimal("50.00"),
+    ]
+    assert rows[0].merchant == "Zalando Payments G"
+    assert "Nok 957,00 Zalando Payments G" in rows[0].raw_text
+    assert all(row.currency_code == "NOK" for row in rows)
+
+
 def test_parser_does_not_guess_year_for_named_dates_without_a_header() -> None:
     lines = [
         OCRLine("18. juli", 0.96, 9, 60, 50, 17),

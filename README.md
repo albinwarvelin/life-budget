@@ -112,8 +112,8 @@ ignored by Git.
 
 The parser inverts dark screenshots, enlarges and sharpens text, runs table and sparse-text OCR passes,
 then groups columns into rows using their image coordinates. It supports both merchant-first tables and
-compact date-first Nordic views. For compact views, a heading such as `Juli 2026` supplies the explicit
-year for rows such as `18. juli`. If the heading is cropped, the importer reuses the year from the
+compact date-first Nordic views. For compact views, a heading such as `Juli 2026` or `April 2026`
+supplies the explicit year for rows such as `18. juli` or the abbreviated `29. apr.`. If the heading is cropped, the importer reuses the year from the
 most recent dated screenshot import for that same account, then falls back to the account's most
 recently created transaction. It never guesses from the current calendar. Amount selection prefers
 the selected account's currency over foreign conversion annotations; every draft is forced to the
