@@ -161,6 +161,8 @@ def approve_screenshot_import(
     drafts = {draft.id: draft for draft in batch.drafts}
     if len({row.draft_id for row in payload.rows}) != len(payload.rows):
         raise ValueError("A draft row was submitted more than once")
+    if {row.draft_id for row in payload.rows} != set(drafts):
+        raise ValueError("Every draft row must be accepted or rejected before completing an import")
     transactions: list[tuple[Transaction, Decimal]] = []
     rejected: list[int] = []
     for approved in payload.rows:

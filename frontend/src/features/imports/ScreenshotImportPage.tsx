@@ -53,7 +53,10 @@ export function ScreenshotImportPage() {
     queryKey: ["screenshot-import", batchId],
     queryFn: () => api.getImportBatch(batchId!),
     enabled: batchId !== null,
-    refetchInterval: (query) => ["queued", "processing"].includes(query.state.data?.status ?? "") ? 700 : false,
+    // OCR takes seconds, so sub-second full-batch polling creates needless API
+    // and JSON work without making the progress display meaningfully smoother.
+    refetchInterval: (query) =>
+      ["queued", "processing"].includes(query.state.data?.status ?? "") ? 1500 : false,
   });
   useEffect(() => {
     if (batch.data?.status !== "review" || rows.length) return;

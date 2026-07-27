@@ -9,7 +9,6 @@ from app.services.learning_features import amount_band, normalize_text, tokenize
 from app.type_learning_db import TypeLearningSessionLocal, ensure_type_learning_schema
 from app.type_learning_models import TypeLearningEvent, TypePattern
 
-TRANSACTION_TYPES = ("expense", "income", "reimbursement", "savings", "transfer")
 TYPE_SIGNAL_WEIGHTS = {
     "amount_sign": 3.0,
     "merchant": 2.0,
@@ -105,10 +104,12 @@ def predict_transaction_type(
     )
     scores = dict(priors)
     strongest: dict[str, tuple[float, str, int]] = {}
+    # Feature extraction normalizes and tokenizes merchant text. It depends
+    # only on this request, so calculate it once instead of repeating that work
+    # for every stored pattern in the model.
+    requested_features = _features(amount, merchant, category_id, currency_code)
     for pattern in list_type_patterns(db):
-        for feature_type, feature_text, base_weight, feature_category in _features(
-            amount, merchant, category_id, currency_code
-        ):
+        for feature_type, feature_text, base_weight, feature_category in requested_features:
             if pattern.pattern_type != feature_type or pattern.category_id != feature_category:
                 continue
             if feature_type == "merchant_token":

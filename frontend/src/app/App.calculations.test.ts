@@ -36,6 +36,16 @@ describe("transfer totals and balances", () => {
     expect(result.net.SEK).toBe(110);
   });
 
+  it("adds fixed-point amounts without floating-point drift", () => {
+    const result = totals([
+      transaction({ amount: "0.10", transaction_type: "income" }),
+      transaction({ id: 2, amount: "0.20", transaction_type: "income" }),
+    ]);
+
+    expect(result.income.SEK).toBe(0.3);
+    expect(result.net.SEK).toBe(0.3);
+  });
+
   it("applies the signed transfer amount to the owning account balance", () => {
     const balances = accountBalances(
       [

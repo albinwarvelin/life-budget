@@ -1,9 +1,9 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+from app.database_engine import create_database_engine
 from app.migration_runner import upgrade_database_to_head
 
 
@@ -12,14 +12,7 @@ class DescriptionLearningBase(DeclarativeBase):
 
 
 settings = get_settings()
-connect_args = (
-    {"check_same_thread": False}
-    if settings.description_learning_database_url.startswith("sqlite")
-    else {}
-)
-description_learning_engine = create_engine(
-    settings.description_learning_database_url, connect_args=connect_args
-)
+description_learning_engine = create_database_engine(settings.description_learning_database_url)
 DescriptionLearningSessionLocal = sessionmaker(
     bind=description_learning_engine, autoflush=False, expire_on_commit=False
 )

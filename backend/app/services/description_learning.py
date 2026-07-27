@@ -277,16 +277,24 @@ def predict_description(
     scores: defaultdict[str, float] = defaultdict(float)
     explanations: defaultdict[str, list[DescriptionContribution]] = defaultdict(list)
 
-    prepared_events = [(event, _event_features(event)) for event in events]
+    # Group each event's features by kind once. Tokenized merchants can create
+    # several values of one kind, while most kinds have only one. Looking up
+    # the requested kind avoids rescanning every unrelated feature for every
+    # event and every prediction signal.
+    prepared_events: list[tuple[DescriptionLearningEvent, dict[str, list[DescriptionFeature]]]] = []
+    for event in events:
+        features_by_type: defaultdict[str, list[DescriptionFeature]] = defaultdict(list)
+        for feature in _event_features(event):
+            features_by_type[feature.pattern_type].append(feature)
+        prepared_events.append((event, dict(features_by_type)))
     for requested in requested_features:
         support: defaultdict[str, float] = defaultdict(float)
         observations: Counter[str] = Counter()
         matched_values: defaultdict[str, Counter[str]] = defaultdict(Counter)
-        for event, stored_features in prepared_events:
+        for event, stored_features_by_type in prepared_events:
             matches = [
                 (stored, _feature_similarity(requested, stored))
-                for stored in stored_features
-                if stored.pattern_type == requested.pattern_type
+                for stored in stored_features_by_type.get(requested.pattern_type, ())
             ]
             stored, similarity = max(matches, key=lambda item: item[1], default=(None, 0.0))
             if stored is None or similarity <= 0:

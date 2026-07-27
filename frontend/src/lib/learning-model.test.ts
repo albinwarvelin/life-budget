@@ -1,18 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ExplorerPattern, LearningPattern } from "./api";
-import { calculateEvidenceProbabilities, calculateTargetProbabilities } from "./learning-model";
-
-const connection = (category_id: number, weight: number): LearningPattern => ({
-  id: category_id,
-  pattern_type: "merchant_token",
-  pattern_text: "ica",
-  category_id,
-  account_id: null,
-  transaction_type: "expense",
-  weight,
-  observations: 1,
-});
+import { ExplorerPattern } from "./api";
+import { calculateTargetProbabilities } from "./learning-model";
 
 describe("calculateTargetProbabilities", () => {
   it("supports category, type, and description graph targets", () => {
@@ -23,22 +12,5 @@ describe("calculateTargetProbabilities", () => {
 
     expect(calculateTargetProbabilities(patterns, "amount_band", "SEK:0-49"))
       .toMatchObject([{ targetKey: "Coffee", probability: 0.75 }, { targetKey: "Fuel", probability: 0.25 }]);
-  });
-});
-
-describe("calculateEvidenceProbabilities", () => {
-  it("normalizes the stored evidence across connected categories", () => {
-    const result = calculateEvidenceProbabilities([connection(1, 3), connection(2, 1)], "merchant_token", "ica");
-
-    expect(result.map((item) => [item.categoryId, item.probability])).toEqual([
-      [1, 0.75],
-      [2, 0.25],
-    ]);
-  });
-
-  it("ignores other phrases and signal types", () => {
-    const other = { ...connection(2, 50), pattern_text: "coop" };
-    expect(calculateEvidenceProbabilities([connection(1, 2), other], "merchant_token", "ica"))
-      .toHaveLength(1);
   });
 });

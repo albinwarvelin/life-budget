@@ -23,11 +23,21 @@ def upgrade() -> None:
         sa.Column("account_id", sa.Integer(), nullable=True),
         sa.Column("transaction_type", sa.String(length=15), nullable=True),
         sa.Column("source", sa.String(length=30), nullable=False, server_default="manual"),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()
+        ),
     )
-    op.create_index("ix_category_learning_events_merchant_normalized", "category_learning_events", ["merchant_normalized"])
-    op.create_index("ix_category_learning_events_category_id", "category_learning_events", ["category_id"])
-    op.create_index("ix_category_learning_events_account_id", "category_learning_events", ["account_id"])
+    op.create_index(
+        "ix_category_learning_events_merchant_normalized",
+        "category_learning_events",
+        ["merchant_normalized"],
+    )
+    op.create_index(
+        "ix_category_learning_events_category_id", "category_learning_events", ["category_id"]
+    )
+    op.create_index(
+        "ix_category_learning_events_account_id", "category_learning_events", ["account_id"]
+    )
     op.create_table(
         "category_patterns",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -38,8 +48,17 @@ def upgrade() -> None:
         sa.Column("transaction_type", sa.String(length=15), nullable=True),
         sa.Column("weight", sa.Float(), nullable=False, server_default="0"),
         sa.Column("observations", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()),
-        sa.UniqueConstraint("pattern_type", "pattern_text", "category_id", "account_id", "transaction_type", name="uq_category_pattern_connection"),
+        sa.Column(
+            "updated_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()
+        ),
+        sa.UniqueConstraint(
+            "pattern_type",
+            "pattern_text",
+            "category_id",
+            "account_id",
+            "transaction_type",
+            name="uq_category_pattern_connection",
+        ),
     )
     op.create_index("ix_category_patterns_pattern_type", "category_patterns", ["pattern_type"])
     op.create_index("ix_category_patterns_pattern_text", "category_patterns", ["pattern_text"])

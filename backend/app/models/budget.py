@@ -103,7 +103,10 @@ class Transaction(Base):
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.current_timestamp()
+        DateTime,
+        nullable=False,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
     )
 
     account: Mapped[Account] = relationship(back_populates="transactions")

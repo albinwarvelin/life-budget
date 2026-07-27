@@ -289,8 +289,7 @@ def test_description_model_uses_compounds_from_a_shared_merchant_token() -> None
 
         assert prediction.description == "Groceries"
         signal_types = {
-            contribution.signal_type
-            for contribution in prediction.candidates[0].contributions
+            contribution.signal_type for contribution in prediction.candidates[0].contributions
         }
         assert "merchant_token_category_band" in signal_types
         assert "merchant_token_amount_band" in signal_types

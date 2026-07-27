@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { Transaction } from "./api";
 import { translate } from "./i18n";
-import { groupByMonth, monthKey, summarizeBy } from "./transaction-summary";
+import { groupByMonth, monthKey } from "./transaction-summary";
 
 function transaction(overrides: Partial<Transaction>): Transaction {
   return {
@@ -40,22 +40,5 @@ describe("transaction summaries", () => {
     ];
     expect(monthKey("2026-07-17")).toBe("2026-07");
     expect(Object.keys(groupByMonth(items))).toEqual(["2026-07", "2026-06"]);
-  });
-
-  it("summarizes expenses as negative and income/reimbursements as positive", () => {
-    const items = [
-      transaction({ id: 1, account_id: 1, category_id: 10, amount: "100.00", transaction_type: "expense" }),
-      transaction({ id: 2, account_id: 1, category_id: 10, amount: "25.00", transaction_type: "reimbursement" }),
-      transaction({ id: 3, account_id: 2, category_id: 20, amount: "500.00", transaction_type: "income" }),
-      transaction({ id: 4, account_id: 2, amount: "80.00", transaction_type: "transfer" }),
-    ];
-    const categories = summarizeBy(items, "category_id", new Map([[10, "Food"], [20, "Salary"]]));
-    const accounts = summarizeBy(items, "account_id", new Map([[1, "Everyday"], [2, "Savings"]]));
-    expect(categories).toEqual([
-      { key: "20:SEK", label: "Salary", amount: 500, currency_code: "SEK" },
-      { key: "10:SEK", label: "Food", amount: -75, currency_code: "SEK" },
-    ]);
-    expect(accounts.find((row) => row.label === "Everyday")?.amount).toBe(-75);
-    expect(accounts.find((row) => row.label === "Savings")?.amount).toBe(500);
   });
 });

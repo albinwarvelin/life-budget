@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Account, Category, Currency, Transaction
+from app.models import Account, Category, Currency, ImportBatch, Transaction
 from app.schemas import (
     AccountCreate,
     AccountResponse,
@@ -74,10 +74,16 @@ def list_accounts(db: Session = Depends(get_db)) -> list[Account]:
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
-    """Delete an account and all linked transactions, including local files."""
+    """Delete an account and all linked local transactions and import drafts."""
     account = db.get(Account, account_id)
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    # Foreign-key enforcement is enabled, so remove account-owned import
+    # batches explicitly. Their draft rows are deleted by the ORM cascade.
+    batches = db.scalars(select(ImportBatch).where(ImportBatch.account_id == account_id))
+    for batch in batches:
+        _remove_local_file(batch.stored_path)
+        db.delete(batch)
     for transaction in list(account.transactions):
         _remove_attachment_file(transaction)
         db.delete(transaction)
@@ -152,12 +158,15 @@ def update_category(
 
 @router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_category(category_id: int, db: Session = Depends(get_db)) -> None:
-    """Delete a category and leave linked transactions uncategorized."""
+    """Delete a category while preserving transactions and child categories."""
     category = db.get(Category, category_id)
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
     for transaction in category.transactions:
         transaction.category_id = None
+    children = db.scalars(select(Category).where(Category.parent_id == category_id))
+    for child in children:
+        child.parent_id = None
     db.delete(category)
     db.commit()
 
@@ -223,10 +232,15 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)) -> No
 
 def _remove_attachment_file(transaction: Transaction) -> None:
     """Remove a transaction's local attachment if one exists."""
-    if transaction.attachment_path:
-        attachment_path = Path(transaction.attachment_path)
-        if attachment_path.exists():
-            attachment_path.unlink()
+    _remove_local_file(transaction.attachment_path)
+
+
+def _remove_local_file(stored_path: str | None) -> None:
+    """Remove one known local path while treating an absent file as already clean."""
+    if stored_path:
+        path = Path(stored_path)
+        if path.exists():
+            path.unlink()
 
 
 @router.post("/transactions/{transaction_id}/attachment", response_model=TransactionResponse)

@@ -12,3 +12,15 @@ export function transactionAmountPrefix(
   if (transactionType === "savings") return Number(amount) < 0 ? "−" : "+";
   return "↔";
 }
+
+/**
+ * Avoid rendering a negative savings value as ``−-50`` when the table already
+ * supplies a separate directional marker. Transfers keep their stored sign
+ * because the neutral transfer marker does not communicate direction.
+ */
+export function transactionAmountMagnitude(
+  transactionType: "expense" | "income" | "reimbursement" | "savings" | "transfer",
+  amount: string,
+): string {
+  return transactionType === "savings" ? String(Math.abs(Number(amount))) : amount;
+}
