@@ -137,10 +137,6 @@ Tests use disposable databases and do not modify your financial or learning data
 
 ## Current limitations
 
-- Single local user; no authentication or safe network sharing yet
-- No bank connection, automatic synchronization, or exchange-rate conversion
-- Account balances are derived from recorded transactions; opening balances are
-  not modeled yet
 - Screenshot OCR is heuristic and always requires review
 - Learning corrections are additive; editing or deleting a historical
   transaction does not yet retract its previous learning event
