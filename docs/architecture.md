@@ -37,6 +37,22 @@ Money is persisted as fixed-point `Decimal`/`NUMERIC`. Frontend summaries add
 integer minor units rather than binary floating-point amounts. Currencies remain
 separate throughout storage and summaries.
 
+## Monthly account balances
+
+`GET /api/v1/account-monthly-balances` calculates balance history in a backend
+service using `Decimal`. For every relevant account and calendar month it
+returns the preceding month-end balance, that month's signed ledger movement,
+and the resulting month-end balance. Missing activity months are emitted with a
+zero movement so consecutive opening and closing values remain auditable.
+
+Expense amounts reduce an account; income and reimbursements increase it;
+savings and transfers use their stored signed amount. Account and currency
+filters may narrow the histories, but transaction-type filters never alter a
+balance. Currencies are returned per account and are never combined.
+
+There is currently no separate opening-balance field. The first recorded month
+for an account therefore starts from zero, which is stated in the Overview UI.
+
 ## Screenshot import
 
 ```text

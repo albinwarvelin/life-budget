@@ -122,6 +122,74 @@ def test_parser_uses_norwegian_month_header_for_compact_yearless_rows() -> None:
     assert all(row.currency_code == "NOK" for row in rows)
 
 
+def test_parser_reads_abbreviated_august_dates_in_compact_bank_view() -> None:
+    """Rows marked ``aug.`` must inherit the explicit year in the screenshot."""
+    lines = [OCRLine("August 2026", 0.98, 8, 15, 100, 18)]
+    source_rows = [
+        ("8. aug.", "Reservert: Ta Walkthrough", "-383,63 kr"),
+        ("7. aug.", "Reservert: Delhaize", "-81,41 kr"),
+        ("6. aug.", "Decathlon 0288", "-1 146,46 kr"),
+        ("1. aug.", "M Serena Boutique", "-61,90 kr"),
+    ]
+    for index, (transaction_date, merchant, amount) in enumerate(source_rows):
+        top = 60 + index * 52
+        lines.extend(
+            [
+                OCRLine(transaction_date, 0.96, 9, top, 55, 17),
+                OCRLine(merchant, 0.94, 83, top, 280, 17),
+                OCRLine(amount, 0.95, 660, top, 82, 17),
+            ]
+        )
+
+    rows = parse_transaction_lines(lines, "NOK")
+
+    assert [row.transaction_date for row in rows] == [
+        date(2026, 8, 8),
+        date(2026, 8, 7),
+        date(2026, 8, 6),
+        date(2026, 8, 1),
+    ]
+    assert [row.signed_amount for row in rows] == [
+        Decimal("-383.63"),
+        Decimal("-81.41"),
+        Decimal("-1146.46"),
+        Decimal("-61.90"),
+    ]
+    assert [row.merchant for row in rows] == [
+        "Ta Walkthrough",
+        "Delhaize",
+        "Decathlon 0288",
+        "M Serena Boutique",
+    ]
+
+
+def test_rejected_draft_does_not_require_readable_transaction_fields() -> None:
+    """Users must be able to reject the exact rows OCR could not complete."""
+    payload = ApproveImportRequest.model_validate(
+        {
+            "rows": [
+                {
+                    "draft_id": 42,
+                    "accepted": False,
+                    "transaction_date": "",
+                    "merchant": "",
+                    "signed_amount": "",
+                    "currency_code": "NOK",
+                    "account_id": 2,
+                    "transaction_type": "expense",
+                    "category_id": None,
+                }
+            ]
+        }
+    )
+
+    [rejected] = payload.rows
+    assert rejected.accepted is False
+    assert rejected.transaction_date is None
+    assert rejected.merchant is None
+    assert rejected.signed_amount is None
+
+
 def test_parser_reads_abbreviated_april_dates_in_compact_bank_view() -> None:
     """The Norwegian ``apr.`` abbreviation must inherit April from its heading."""
     lines = [OCRLine("April 2026", 0.98, 10, 15, 95, 18)]

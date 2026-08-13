@@ -11,6 +11,7 @@ from app.db import get_db
 from app.models import Account, Category, Currency, ImportBatch, Transaction
 from app.schemas import (
     AccountCreate,
+    AccountMonthlyBalanceResponse,
     AccountResponse,
     CategoryCreate,
     CategoryResponse,
@@ -19,6 +20,7 @@ from app.schemas import (
     TransactionCreate,
     TransactionResponse,
 )
+from app.services.account_balances import monthly_account_balances
 from app.services.transactions import (
     TransactionValidationError,
     create_transaction as create_transaction_service,
@@ -70,6 +72,23 @@ def create_account(payload: AccountCreate, db: Session = Depends(get_db)) -> Acc
 def list_accounts(db: Session = Depends(get_db)) -> list[Account]:
     """Return accounts ordered by display name."""
     return list(db.scalars(select(Account).order_by(Account.name)))
+
+
+@router.get(
+    "/account-monthly-balances",
+    response_model=list[AccountMonthlyBalanceResponse],
+)
+def list_account_monthly_balances(
+    currency_code: str | None = Query(default=None, min_length=3, max_length=3),
+    account_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+) -> list[AccountMonthlyBalanceResponse]:
+    """Return complete monthly account histories for the Overview balance table."""
+    return monthly_account_balances(
+        db,
+        currency_code=currency_code,
+        account_id=account_id,
+    )
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)

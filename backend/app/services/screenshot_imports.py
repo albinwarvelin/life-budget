@@ -173,6 +173,14 @@ def approve_screenshot_import(
             draft.status = "rejected"
             rejected.append(draft.id)
             continue
+        # The request schema guarantees these values for accepted rows, while
+        # leaving them optional for an unreadable row the user rejected.
+        if (
+            approved.transaction_date is None
+            or approved.merchant is None
+            or approved.signed_amount is None
+        ):
+            raise ValueError("Accepted import rows require a date, merchant, and amount")
         stored_amount = (
             approved.signed_amount
             if approved.transaction_type in {"savings", "transfer"}

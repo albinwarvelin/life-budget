@@ -46,6 +46,9 @@ MONTH_NAMES = {
     "june": 6,
     "juli": 7,
     "july": 7,
+    # Norwegian compact bank views abbreviate August as ``aug.`` on each
+    # transaction row even when the section heading spells out ``August``.
+    "aug": 8,
     "august": 8,
     "augusti": 8,
     "september": 9,
@@ -157,7 +160,8 @@ class TesseractScreenshotParser:
         viable = [rows for rows in candidates if rows]
         if not viable:
             raise ScreenshotParserError(
-                "No transaction rows with both a date and amount were found"
+                "No transaction rows could be read. Make sure the screenshot includes "
+                "a month and year heading plus rows with a date and amount."
             )
         # Prefer completeness first, then OCR certainty. This directly avoids
         # choosing a high-confidence pass that happened to miss several rows.

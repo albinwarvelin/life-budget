@@ -7,13 +7,16 @@ previews the image before upload. Tesseract then runs locally with table and
 sparse-text passes; no screenshot is sent to an external OCR provider.
 
 The parser supports full merchant/date/amount tables and compact Nordic layouts.
-It handles localized named months, cropped year headings using recent
-account-import context, account-currency amounts beside foreign annotations,
-unsigned incoming/outgoing columns, and common transaction-text prefixes.
+It handles localized named months and common abbreviations such as `apr.` and
+`aug.`, cropped year headings using recent account-import context,
+account-currency amounts beside foreign annotations, unsigned incoming/outgoing
+columns, and common transaction-text prefixes.
 
 Every extracted row remains a draft. The user must accept or reject every row
-before the batch completes. Accepted expenses, income, and reimbursements store
-positive magnitudes; savings and transfers preserve their reviewed sign.
+before the batch completes. An incomplete OCR row can be rejected without first
+inventing missing transaction values. Accepted expenses, income, and
+reimbursements store positive magnitudes; savings and transfers preserve their
+reviewed sign. Validation failures identify the affected review row and field.
 
 ## Prediction stores
 

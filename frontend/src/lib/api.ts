@@ -17,6 +17,15 @@ export type Account = {
   institution: string | null;
   is_active: boolean;
 };
+export type AccountMonthlyBalance = {
+  month: string;
+  account_id: number;
+  account_name: string;
+  currency_code: string;
+  carried_over: string;
+  monthly_change: string;
+  ending_balance: string;
+};
 export type Category = {
   id: number;
   name: string;
@@ -174,6 +183,53 @@ export type ApprovedImportRow = {
   notes?: string;
 };
 
+type ApiValidationIssue = {
+  loc?: unknown[];
+  msg?: unknown;
+};
+
+/** Turn FastAPI strings and structured validation issues into readable UI text. */
+export function formatApiError(detail: unknown, status: number): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((issue) => formatValidationIssue(issue))
+      .filter((message): message is string => Boolean(message));
+    if (messages.length) return messages.join(" · ");
+  }
+
+  // Some endpoints may return a structured domain error instead of FastAPI's
+  // validation list. Prefer its message, but never stringify an object into
+  // the unhelpful "[object Object]" text previously shown by the import UI.
+  if (detail && typeof detail === "object" && "message" in detail) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return `Request failed (${status})`;
+}
+
+function formatValidationIssue(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const issue = value as ApiValidationIssue;
+  if (typeof issue.msg !== "string") return null;
+
+  const location = Array.isArray(issue.loc)
+    ? issue.loc.filter((part) => part !== "body")
+    : [];
+  const rowPosition = location[0] === "rows" && typeof location[1] === "number"
+    ? location[1] + 1
+    : null;
+  const fieldParts = location.slice(rowPosition === null ? 0 : 2)
+    .filter((part): part is string | number => ["string", "number"].includes(typeof part))
+    .map((part) => String(part).replaceAll("_", " "));
+  const prefix = [
+    rowPosition === null ? null : `Row ${rowPosition}`,
+    fieldParts.length ? fieldParts.join(" ") : null,
+  ].filter(Boolean).join(" · ");
+  return prefix ? `${prefix}: ${issue.msg}` : issue.msg;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const isFormData = options?.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -184,8 +240,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail ?? `Request failed (${response.status})`);
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new Error(formatApiError(body?.detail, response.status));
   }
 
   if (response.status === 204) return undefined as T;
@@ -195,6 +251,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   listCurrencies: () => request<Currency[]>("/api/v1/currencies"),
   listAccounts: () => request<Account[]>("/api/v1/accounts"),
+  listAccountMonthlyBalances: (params: URLSearchParams) =>
+    request<AccountMonthlyBalance[]>(`/api/v1/account-monthly-balances?${params.toString()}`),
   createAccount: (input: AccountInput) =>
     request<Account>("/api/v1/accounts", { method: "POST", body: JSON.stringify(input) }),
   updateAccount: (id: number, input: AccountInput) =>

@@ -65,7 +65,7 @@ export function ScreenshotImportPage() {
 
   const approve = useMutation({
     mutationFn: () => api.approveImport(batchId!, toApprovalRows(rows)),
-    onSuccess: (result) => { setFinishedCount(result.created_transaction_ids.length); queryClient.invalidateQueries({ queryKey: ["transactions"] }); },
+    onSuccess: (result) => { setFinishedCount(result.created_transaction_ids.length); queryClient.invalidateQueries({ queryKey: ["transactions"] }); queryClient.invalidateQueries({ queryKey: ["account-monthly-balances"] }); },
   });
   const categoryName = (id: number | null) => { const category = categories.data?.find((item) => item.id === id); return category?.localized_names?.[locale] ?? category?.localized_names?.en ?? category?.name ?? c.uncategorized; };
   const acceptedCount = rows.filter((row) => row.accepted).length;

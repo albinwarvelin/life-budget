@@ -41,6 +41,18 @@ class AccountResponse(AccountCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AccountMonthlyBalanceResponse(BaseModel):
+    """One account's auditable opening and closing balance for a calendar month."""
+
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    account_id: int
+    account_name: str
+    currency_code: str = Field(min_length=3, max_length=3)
+    carried_over: Decimal = Field(decimal_places=2)
+    monthly_change: Decimal = Field(decimal_places=2)
+    ending_balance: Decimal = Field(decimal_places=2)
+
+
 class CategoryCreate(BaseModel):
     """Input for a reusable category label and its reporting kind."""
 

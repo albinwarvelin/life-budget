@@ -53,6 +53,151 @@ def test_transaction_requires_matching_account_currency(client: TestClient) -> N
     assert "match account currency" in response.json()["detail"]
 
 
+def test_monthly_account_balances_are_continuous_and_currency_isolated(
+    client: TestClient,
+) -> None:
+    """Opening, movement, and closing values follow the complete account ledger."""
+    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
+    client.post("/api/v1/currencies", json={"code": "NOK", "name": "Norwegian krone"})
+    checking = client.post(
+        "/api/v1/accounts",
+        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    savings = client.post(
+        "/api/v1/accounts",
+        json={"name": "Savings", "account_type": "bank", "currency_code": "SEK"},
+    ).json()
+    norway = client.post(
+        "/api/v1/accounts",
+        json={"name": "Norway", "account_type": "bank", "currency_code": "NOK"},
+    ).json()
+    empty = client.post(
+        "/api/v1/accounts",
+        json={"name": "Unused", "account_type": "cash", "currency_code": "SEK"},
+    ).json()
+
+    def record(
+        *,
+        transaction_date: str,
+        account: dict,
+        amount: str,
+        transaction_type: str,
+    ) -> None:
+        response = client.post(
+            "/api/v1/transactions",
+            json={
+                "transaction_date": transaction_date,
+                "account_id": account["id"],
+                "amount": amount,
+                "currency_code": account["currency_code"],
+                "transaction_type": transaction_type,
+                "merchant": "Synthetic balance fixture",
+            },
+        )
+        assert response.status_code == 201
+
+    record(
+        transaction_date="2026-01-03",
+        account=checking,
+        amount="1000.00",
+        transaction_type="income",
+    )
+    record(
+        transaction_date="2026-01-10",
+        account=checking,
+        amount="100.00",
+        transaction_type="expense",
+    )
+    record(
+        transaction_date="2026-01-20",
+        account=checking,
+        amount="-200.00",
+        transaction_type="savings",
+    )
+    record(
+        transaction_date="2026-01-20",
+        account=savings,
+        amount="200.00",
+        transaction_type="savings",
+    )
+    record(
+        transaction_date="2026-01-05",
+        account=norway,
+        amount="500.00",
+        transaction_type="income",
+    )
+    record(
+        transaction_date="2026-03-03",
+        account=checking,
+        amount="50.00",
+        transaction_type="reimbursement",
+    )
+    record(
+        transaction_date="2026-03-07",
+        account=checking,
+        amount="-25.00",
+        transaction_type="transfer",
+    )
+    record(
+        transaction_date="2026-03-07",
+        account=savings,
+        amount="25.00",
+        transaction_type="transfer",
+    )
+    record(
+        transaction_date="2026-03-12",
+        account=norway,
+        amount="100.00",
+        transaction_type="expense",
+    )
+
+    response = client.get("/api/v1/account-monthly-balances")
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 9
+    assert {row["account_id"] for row in rows} == {
+        checking["id"],
+        savings["id"],
+        norway["id"],
+    }
+    assert empty["id"] not in {row["account_id"] for row in rows}
+
+    by_key = {(row["month"], row["account_id"]): row for row in rows}
+    assert by_key[("2026-01", checking["id"])] == {
+        "month": "2026-01",
+        "account_id": checking["id"],
+        "account_name": "Everyday",
+        "currency_code": "SEK",
+        "carried_over": "0.00",
+        "monthly_change": "700.00",
+        "ending_balance": "700.00",
+    }
+    assert by_key[("2026-02", checking["id"])]["carried_over"] == "700.00"
+    assert by_key[("2026-02", checking["id"])]["monthly_change"] == "0.00"
+    assert by_key[("2026-02", checking["id"])]["ending_balance"] == "700.00"
+    assert by_key[("2026-03", checking["id"])]["ending_balance"] == "725.00"
+    assert by_key[("2026-03", savings["id"])]["ending_balance"] == "225.00"
+    assert by_key[("2026-03", norway["id"])] == {
+        "month": "2026-03",
+        "account_id": norway["id"],
+        "account_name": "Norway",
+        "currency_code": "NOK",
+        "carried_over": "500.00",
+        "monthly_change": "-100.00",
+        "ending_balance": "400.00",
+    }
+
+    sek_rows = client.get(
+        "/api/v1/account-monthly-balances", params={"currency_code": "sek"}
+    ).json()
+    assert {row["currency_code"] for row in sek_rows} == {"SEK"}
+    savings_rows = client.get(
+        "/api/v1/account-monthly-balances", params={"account_id": savings["id"]}
+    ).json()
+    assert len(savings_rows) == 3
+    assert {row["account_id"] for row in savings_rows} == {savings["id"]}
+
+
 def test_only_sek_and_nok_are_initially_available_but_optional_currencies_can_be_added(
     client: TestClient,
 ) -> None:

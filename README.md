@@ -9,7 +9,7 @@ not sent to an external service.
 
 - Accounts, categories, and localized English/Swedish category names
 - Expense, income, reimbursement, signed savings, and signed transfer entries
-- Monthly account/category summaries and derived account balances
+- Monthly account/category summaries with carried-over and month-end account balances
 - Local transaction attachments
 - Screenshot import with local Tesseract OCR and review-before-save
 - Explainable category, transaction-type, and description suggestions
@@ -140,7 +140,7 @@ Tests use disposable databases and do not modify your financial or learning data
 - Single local user; no authentication or safe network sharing yet
 - No bank connection, automatic synchronization, or exchange-rate conversion
 - Account balances are derived from recorded transactions; opening balances are
-  not modeled yet
+  not modeled yet. Each account's earliest recorded month therefore starts at zero
 - Screenshot OCR is heuristic and always requires review
 - Learning corrections are additive; editing or deleting a historical
   transaction does not yet retract its previous learning event
