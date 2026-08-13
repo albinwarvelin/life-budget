@@ -140,7 +140,7 @@ Tests use disposable databases and do not modify your financial or learning data
 - Single local user; no authentication or safe network sharing yet
 - No bank connection, automatic synchronization, or exchange-rate conversion
 - Account balances are derived from recorded transactions; opening balances are
-  not modeled yet. Each account's earliest recorded month therefore starts at zero
+  not modeled yet
 - Screenshot OCR is heuristic and always requires review
 - Learning corrections are additive; editing or deleting a historical
   transaction does not yet retract its previous learning event
