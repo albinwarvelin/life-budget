@@ -95,6 +95,11 @@ class Transaction(Base):
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    # Preserve the approved source row independently of insertion time. A
+    # removed draft must not delete the financial record it originally created.
+    import_draft_id: Mapped[int | None] = mapped_column(
+        ForeignKey("import_draft_rows.id", ondelete="SET NULL"), unique=True, index=True
+    )
     attachment_filename: Mapped[str | None] = mapped_column(String(255))
     attachment_path: Mapped[str | None] = mapped_column(String(500))
     attachment_content_type: Mapped[str | None] = mapped_column(String(120))

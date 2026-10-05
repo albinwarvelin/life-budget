@@ -1,9 +1,9 @@
 from datetime import date
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from app.models import Account, Transaction
+from app.models import Account, ImportDraftRow, Transaction
 
 
 def get_transaction(db: Session, transaction_id: int) -> Transaction | None:
@@ -21,8 +21,29 @@ def list_transactions(
     account_id: int | None = None,
 ) -> list[Transaction]:
     """Build and execute the transaction list query used by the API."""
-    statement: Select[tuple[Transaction]] = select(Transaction).order_by(
-        Transaction.transaction_date.desc(), Transaction.id.desc()
+    # Keep each import together within a date, positioned by its most recently
+    # inserted transaction. Inside that group the bank screenshot's top-to-
+    # bottom row order wins over insertion order. Manual and historical rows
+    # retain their existing newest-ID-first tie break.
+    import_groups = (
+        select(
+            ImportDraftRow.batch_id.label("batch_id"),
+            func.max(Transaction.id).label("latest_transaction_id"),
+        )
+        .join(Transaction, Transaction.import_draft_id == ImportDraftRow.id)
+        .group_by(ImportDraftRow.batch_id)
+        .subquery()
+    )
+    statement: Select[tuple[Transaction]] = (
+        select(Transaction)
+        .outerjoin(ImportDraftRow, Transaction.import_draft_id == ImportDraftRow.id)
+        .outerjoin(import_groups, ImportDraftRow.batch_id == import_groups.c.batch_id)
+        .order_by(
+            Transaction.transaction_date.desc(),
+            func.coalesce(import_groups.c.latest_transaction_id, Transaction.id).desc(),
+            ImportDraftRow.row_index.asc(),
+            Transaction.id.desc(),
+        )
     )
     if currency_code:
         statement = statement.where(Transaction.currency_code == currency_code.upper())

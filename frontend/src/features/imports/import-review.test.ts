@@ -12,6 +12,17 @@ const draft: ImportDraft = {
 };
 
 describe("screenshot import review mapping", () => {
+  it("keeps incomplete OCR fields editable with their validation errors", () => {
+    const row = toEditableImportRow({ ...draft, transaction_date: null, signed_amount: null,
+      validation_errors: ["Date could not be read", "Amount could not be read"] });
+    expect(row.transaction_date).toBe("");
+    expect(row.signed_amount).toBe("");
+    expect(row.validation_errors).toEqual(["Date could not be read", "Amount could not be read"]);
+    const [approved] = toApprovalRows([{ ...row, transaction_date: "2026-09-05", signed_amount: "-123.45" }]);
+    expect(approved.transaction_date).toBe("2026-09-05");
+    expect(approved.signed_amount).toBe("-123.45");
+  });
+
   it("starts with parser predictions but keeps the signed source amount", () => {
     const row = toEditableImportRow(draft);
     expect(row).toMatchObject({ draft_id: 7, accepted: true, signed_amount: "-245.50", transaction_type: "expense", category_id: 3 });

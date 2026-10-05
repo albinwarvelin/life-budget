@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from decimal import Decimal
 from pathlib import Path
 
@@ -50,6 +51,15 @@ def process_screenshot_batch(batch_id: int) -> None:
                 batch.currency_code,
                 fallback_year=fallback_year,
             )
+            # Repeated visual rows remain separate drafts. Flag equal readable
+            # values within this image as well as matches against saved records.
+            row_identities = Counter(
+                (row.transaction_date, row.signed_amount, (row.merchant or "").casefold())
+                for row in extracted_rows
+                if row.transaction_date is not None
+                and row.signed_amount is not None
+                and row.merchant
+            )
             batch.progress = 40
             db.commit()
 
@@ -92,13 +102,23 @@ def process_screenshot_batch(batch_id: int) -> None:
                     suggested_description = (
                         extracted.description or description_prediction.description
                     )
-                    duplicate = _possible_duplicate(
-                        db,
-                        account_id=batch.account_id,
-                        transaction_date=extracted.transaction_date,
-                        signed_amount=extracted.signed_amount,
-                        merchant=extracted.merchant,
-                        transaction_type=type_prediction.transaction_type,
+                    duplicate = (
+                        _possible_duplicate(
+                            db,
+                            account_id=batch.account_id,
+                            transaction_date=extracted.transaction_date,
+                            signed_amount=extracted.signed_amount,
+                            merchant=extracted.merchant,
+                            transaction_type=type_prediction.transaction_type,
+                        )
+                        or row_identities[
+                            (
+                                extracted.transaction_date,
+                                extracted.signed_amount,
+                                (extracted.merchant or "").casefold(),
+                            )
+                        ]
+                        > 1
                     )
                     drafts.append(
                         ImportDraftRow(
@@ -199,7 +219,7 @@ def approve_screenshot_import(
             source="screenshot",
         )
         validate_transaction(db, transaction_payload)
-        transaction = Transaction(**transaction_payload.model_dump())
+        transaction = Transaction(**transaction_payload.model_dump(), import_draft_id=draft.id)
         db.add(transaction)
         draft.status = "accepted"
         transactions.append((transaction, approved.signed_amount))

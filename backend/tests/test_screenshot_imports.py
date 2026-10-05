@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -12,10 +13,59 @@ from app.schemas_imports import ApproveImportRequest, ApprovedImportRow
 from app.services.screenshot_imports import (
     _recent_account_import_year,
     approve_screenshot_import,
+    process_screenshot_batch,
 )
 from app.services.screenshot_parser import OCRLine, parse_signed_decimal, parse_transaction_lines
 from app.services.type_learning import learn_transaction_type, predict_transaction_type
 from app.type_learning_db import TypeLearningBase
+
+
+def test_background_import_keeps_incomplete_and_duplicate_rows_for_review(monkeypatch) -> None:
+    """Extraction must create drafts only, including repeated and uncertain rows."""
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    lines = [
+        OCRLine("5.sep. Example shop -123,45 kr", 0.95, 20, 60, 700, 17),
+        OCRLine("5.sep. Example shop -123,45 kr", 0.95, 20, 110, 700, 17),
+        OCRLine("4.sep. Example cafe unreadable", 0.90, 20, 160, 700, 17),
+    ]
+    extracted = parse_transaction_lines(lines, "NOK")
+    # Simulate a remembered year for the two complete rows while keeping the
+    # final row unresolved. All data and model stores in this test are disposable.
+    extracted[:2] = [replace(row, transaction_date=date(2026, 9, 5)) for row in extracted[:2]]
+    monkeypatch.setattr("app.services.screenshot_imports.SessionLocal", lambda: Session(engine))
+    monkeypatch.setattr(
+        "app.services.screenshot_imports.screenshot_parser.parse", lambda *args, **kwargs: extracted
+    )
+    with Session(engine) as db:
+        db.add(Currency(code="NOK", name="Norwegian krone"))
+        account = Account(name="Synthetic account", account_type="bank", currency_code="NOK")
+        db.add(account)
+        db.flush()
+        batch = ImportBatch(
+            original_filename="synthetic.png",
+            stored_path="uploads/imports/synthetic.png",
+            content_type="image/png",
+            account_id=account.id,
+            currency_code="NOK",
+            status="queued",
+            progress=0,
+        )
+        db.add(batch)
+        db.commit()
+        batch_id = batch.id
+    process_screenshot_batch(batch_id)
+    with Session(engine) as db:
+        batch = db.get(ImportBatch, batch_id)
+        assert batch.status == "review"
+        assert len(batch.drafts) == 3
+        drafts = sorted(batch.drafts, key=lambda row: row.row_index)
+        assert all(row.possible_duplicate for row in drafts[:2])
+        assert drafts[2].validation_errors == ["Date could not be read", "Amount could not be read"]
+        assert db.scalar(select(Transaction.id)) is None
+    engine.dispose()
 
 
 def test_parser_rejoins_all_columns_in_a_long_bank_transaction_table() -> None:
@@ -235,7 +285,10 @@ def test_parser_does_not_guess_year_for_named_dates_without_a_header() -> None:
         OCRLine("-189,93 kr", 0.95, 610, 60, 80, 17),
     ]
 
-    assert parse_transaction_lines(lines, "NOK") == []
+    [row] = parse_transaction_lines(lines, "NOK")
+    assert row.transaction_date is None
+    assert row.merchant == "Rema Moholt"
+    assert row.signed_amount == Decimal("-189.93")
 
 
 def test_parser_uses_remembered_year_when_month_header_is_cropped() -> None:
@@ -423,6 +476,7 @@ def test_approval_preserves_raw_sign_but_stores_expense_magnitude(
         assert result.created_transaction_ids == [transaction.id]
         assert transaction.amount == Decimal("245.50")
         assert transaction.source == "screenshot"
+        assert transaction.import_draft_id == draft.id
         assert learned == [Decimal("-245.50")]
         assert learned_descriptions == ["Groceries"]
         assert draft.status == "accepted"

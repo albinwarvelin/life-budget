@@ -62,7 +62,7 @@ def find_transactions(
     transaction_type: str | None = None,
     account_id: int | None = None,
 ) -> list[Transaction]:
-    """Return transactions using the repository's stable date/id ordering."""
+    """Return newest dates first while preserving imported source-row order."""
     return list_transactions(
         db,
         currency_code=currency_code,

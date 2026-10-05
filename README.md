@@ -18,6 +18,13 @@ not sent to an external service.
 The initial currency catalog contains SEK and NOK. Additional currencies can be
 added, but the application never converts or combines different currencies.
 
+Screenshot imports recognize Nordic month names and abbreviations throughout
+the year. Incomplete rows stay editable in review, and repeated payments are
+flagged rather than silently removed. Check every date, amount, and row count
+against the source image; see [Screenshot imports](docs/imports-and-learning.md).
+New screenshot imports preserve source-row order within each date; older records
+keep their existing ordering. The launcher applies the required schema migration.
+
 ## Quick development setup
 
 Requirements:
@@ -134,13 +141,14 @@ Tests use disposable databases and do not modify your financial or learning data
 - [Development, migrations, and tests](docs/development.md)
 - [Production use, backups, updates, and finalization](docs/production.md)
 - [Screenshot imports and learning models](docs/imports-and-learning.md)
+- [Proposed learning-model redesign](docs/learning-model-design.md)
 
 ## Current limitations
 
 - Single local user; no authentication or safe network sharing yet
 - No bank connection, automatic synchronization, or exchange-rate conversion
 - Account balances are derived from recorded transactions; opening balances are
-  not modeled yet
+  not modeled yet. Each account's earliest recorded month therefore starts at zero
 - Screenshot OCR is heuristic and always requires review
 - Learning corrections are additive; editing or deleting a historical
   transaction does not yet retract its previous learning event

@@ -7,16 +7,34 @@ previews the image before upload. Tesseract then runs locally with table and
 sparse-text passes; no screenshot is sent to an external OCR provider.
 
 The parser supports full merchant/date/amount tables and compact Nordic layouts.
-It handles localized named months and common abbreviations such as `apr.` and
-`aug.`, cropped year headings using recent account-import context,
+It handles localized names and abbreviations for every month, including `jun.`,
+`aug.`, and `sep.`, and OCR spacing variants such as `5.sep.`. Cropped year
+headings use recent account-import context; check the inferred year in review.
+If no year is available, the date stays blank for correction instead of using
+the current calendar year. The parser also handles
 account-currency amounts beside foreign annotations, unsigned incoming/outgoing
-columns, and common transaction-text prefixes.
+columns, and common transaction-text prefixes. Wrapped amount badges can appear
+above or below the date. Foreign-currency annotations never substitute for a
+missing booked account-currency amount.
+
+Recognizable rows with missing or malformed dates or amounts remain incomplete
+drafts with validation errors. Separate rows with identical date, merchant, and
+amount are kept and flagged as possible duplicates for review. OCR can still
+omit text entirely, so compare the draft count and values with the screenshot.
 
 Every extracted row remains a draft. The user must accept or reject every row
 before the batch completes. An incomplete OCR row can be rejected without first
 inventing missing transaction values. Accepted expenses, income, and
 reimbursements store positive magnitudes; savings and transfers preserve their
 reviewed sign. Validation failures identify the affected review row and field.
+
+Approved transactions retain a link to their source draft. Lists show newest
+dates first and preserve the screenshot's top-to-bottom order within each date
+and import batch, regardless of the order in which approval rows are submitted.
+Newer import groups appear first; manual entries keep their insertion-order tie
+break. There is no bank transaction time available to order different sources
+precisely within a day. Historical transactions created before this link was
+introduced keep their prior ordering because source-row matches are ambiguous.
 
 ## Prediction stores
 
