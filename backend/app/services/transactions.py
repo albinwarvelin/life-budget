@@ -3,12 +3,10 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.models import Account, Category, Transaction
-from app.services.category_learning import learn_from_transaction
+from app.services.learning_sync import queue_transaction, try_synchronize
 from app.repositories.transactions import (
-    delete_transaction,
     get_transaction,
     list_transactions,
-    save_transaction,
 )
 from app.schemas import TransactionCreate
 
@@ -48,8 +46,12 @@ def validate_transaction(db: Session, payload: TransactionCreate) -> None:
 def create_transaction(db: Session, payload: TransactionCreate) -> Transaction:
     """Validate and persist a new manually entered transaction."""
     validate_transaction(db, payload)
-    transaction = save_transaction(db, Transaction(**payload.model_dump()))
-    learn_from_transaction(transaction)
+    transaction = Transaction(**payload.model_dump())
+    db.add(transaction)
+    queue_transaction(db, transaction)
+    db.commit()
+    db.refresh(transaction)
+    try_synchronize(db)
     return transaction
 
 
@@ -77,13 +79,28 @@ def update_transaction(db: Session, transaction_id: int, payload: TransactionCre
     """Validate and replace editable fields on an existing transaction."""
     transaction = require_transaction(db, transaction_id)
     validate_transaction(db, payload)
+    # A type correction changes a label, not the observed bank direction.
+    # Signed savings/transfer edits explicitly provide their new direction.
+    if transaction.source_signed_amount is not None:
+        sign = -1 if transaction.source_signed_amount < 0 else 1
+        transaction.source_signed_amount = (
+            payload.amount
+            if payload.transaction_type in {"savings", "transfer"}
+            else sign * abs(payload.amount)
+        )
     for key, value in payload.model_dump().items():
         setattr(transaction, key, value)
-    transaction = save_transaction(db, transaction)
-    learn_from_transaction(transaction)
+    queue_transaction(db, transaction)
+    db.commit()
+    db.refresh(transaction)
+    try_synchronize(db)
     return transaction
 
 
 def remove_transaction(db: Session, transaction_id: int) -> None:
     """Delete one explicitly selected transaction."""
-    delete_transaction(db, require_transaction(db, transaction_id))
+    transaction = require_transaction(db, transaction_id)
+    queue_transaction(db, transaction, operation="delete")
+    db.delete(transaction)
+    db.commit()
+    try_synchronize(db)

@@ -26,9 +26,7 @@ The stores are intentionally separate:
 | Store | Default development file | Contents |
 | --- | --- | --- |
 | Financial | `life_budget.db` | Accounts, categories, transactions, imports |
-| Category learning | `life_budget_learning.db` | Category evidence and events |
-| Type learning | `life_budget_type_learning.db` | Transaction-type evidence |
-| Description learning | `life_budget_description_learning.db` | Description evidence |
+| Prediction | `life_budget_predictions.db` | Current reviewed examples, JSON model snapshots, evaluation |
 
 All engines enable SQLite foreign-key enforcement and a ten-second busy timeout.
 Production uses one Uvicorn worker to limit write contention.
@@ -62,8 +60,10 @@ Upload/paste
   -> parse rows and generate predictions
   -> persist editable draft rows
   -> user accepts/rejects every row
-  -> one financial commit
-  -> confirmed values update isolated learners
+  -> financial records and learning outbox in one commit
+  -> idempotent current-example projection
+  -> pending model changes shown by read-only status
+  -> explicit retraining activates a new snapshot
 ```
 
 OCR and predictions never create transactions before review. The original OCR

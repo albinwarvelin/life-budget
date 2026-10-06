@@ -80,55 +80,67 @@ export type CategoryPrediction = {
 };
 
 export type LearningModelKind = "category" | "type" | "description";
-export type ExplorerPattern = {
-  id: number;
-  pattern_type: string;
-  pattern_text: string;
-  display_text: string | null;
-  localized_display_texts: Record<string, string>;
-  target_key: string;
-  weight: number;
-  observations: number;
-  account_id: number | null;
-  transaction_type: Transaction["transaction_type"] | null;
-  category_id: number | null;
-};
-export type ExplorerModel = {
-  model_kind: LearningModelKind;
-  targets: { key: string; label: string; localized_names: Record<string, string> }[];
-  patterns: ExplorerPattern[];
-  event_count: number;
-  scoring: {
-    signal_weights: Record<string, number>;
-    similarity_threshold: number;
-    account_multiplier: number | null;
-    minimum_confidence: number | null;
-  };
-};
-
-export type DescriptionPredictionContribution = {
-  signal_type: string;
-  signal_value: string;
-  matched_value: string;
-  description: string;
-  observations: number;
-  conditional_probability: number;
-  baseline_probability: number;
-  reliability: number;
-  similarity: number;
-  contribution: number;
-};
-
-export type DescriptionPredictionResult = {
-  description: string | null;
+export type PredictionOutput = {
+  suggestion: string | null;
   confidence: number;
+  calibrated: boolean;
+  context_weight?: number;
   reason: string;
-  candidates: {
-    description: string;
-    score: number;
-    relative_score: number;
-    contributions: DescriptionPredictionContribution[];
-  }[];
+  candidates: { key: string; label: string; probability: number; support: number;
+    contributions: { feature: string; contribution: number }[] }[];
+};
+export type PredictionResult = {
+  snapshot_id: number;
+  outputs: Record<LearningModelKind, PredictionOutput>;
+};
+export type EvaluationMetrics = {
+  samples: number;
+  accuracy: number | null;
+  macro_f1: number | null;
+  log_loss: number | null;
+  baseline_accuracy?: number;
+  top_three_accuracy?: number;
+  coverage?: number;
+  suggestion_precision?: number | null;
+  unseen_counterparties?: number;
+  calibration_bins?: { score: number; accuracy: number; count: number }[];
+};
+export type LearningModelStatus = {
+  reviewed_transactions: number;
+  pending_updates: number;
+  updates_since_training: number;
+  needs_retraining: boolean;
+  snapshot_id: number | null;
+  dataset_revision: number;
+  algorithm: string | null;
+  created_at: string | null;
+  heads: Record<LearningModelKind, {
+    labels: number; calibrated: boolean; threshold: number;
+    regularization: number; temperature: number;
+  }>;
+  configuration: {
+    regularization_candidates: number[]; temperature_candidates: number[];
+    threshold_candidates: number[]; minimum_support: number;
+    suggestion_thresholds: Partial<Record<LearningModelKind, number>>;
+    description_blend_candidates: number[]; description_context_min_rows: number;
+    minimum_validation_samples: number; target_precision: number; wilson_z: number;
+    train_fraction: number; validation_fraction: number;
+    word_ngram_range: [number, number]; character_ngram_range: [number, number];
+    word_features: number; character_features: number; amount_centers: number; amount_width: number;
+  };
+  report: {
+    chronological: Record<LearningModelKind, EvaluationMetrics>;
+    unseen_counterparty: Record<LearningModelKind, EvaluationMetrics> | null;
+    training_samples: number;
+    validation_samples: number;
+    test_samples: number;
+    description_context: string;
+    description_context_reason: string;
+    description_context_selection?: {
+      weight: number; validation_base_log_loss: number | null; validation_blend_log_loss: number | null;
+    };
+    description_comparison?: { independent: EvaluationMetrics; blended: EvaluationMetrics };
+  } | null;
 };
 
 export type ImportDraft = {
@@ -263,18 +275,11 @@ export const api = {
   deleteAccount: (id: number) =>
     request<void>(`/api/v1/accounts/${id}`, { method: "DELETE" }),
   listCategories: () => request<Category[]>("/api/v1/categories"),
-  getExplorerModel: (kind: LearningModelKind) =>
-    request<ExplorerModel>(`/api/v1/learning-models/${kind}`),
-  testDescriptionPrediction: (input: {
-    merchant: string;
-    amount: string;
-    currency_code: string;
-    category_id?: number;
-    transaction_type?: Transaction["transaction_type"];
-  }) =>
-    request<DescriptionPredictionResult>("/api/v1/learning-models/description/predict", {
-      method: "POST",
-      body: JSON.stringify(input),
+  getLearningModelStatus: () => request<LearningModelStatus>("/api/v1/learning-models/status"),
+  retrainLearningModels: () => request<LearningModelStatus>("/api/v1/learning-models/retrain", { method: "POST" }),
+  testPrediction: (input: { merchant: string; amount: string; currency_code: string; account_id?: number }) =>
+    request<PredictionResult>("/api/v1/learning-models/predict", {
+      method: "POST", body: JSON.stringify(input),
     }),
   suggestCategories: (input: {
     merchant: string;

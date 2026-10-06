@@ -1,19 +1,19 @@
 from logging.config import fileConfig
 
 from alembic import context
+from alembic import op  # noqa: F401 - imported so Alembic can load revision modules
 from sqlalchemy import engine_from_config, pool
 
-from app import description_learning_models  # noqa: F401
 from app.config import get_settings
-from app.description_learning_db import DescriptionLearningBase
+from app.prediction_db import PredictionBase
+from app import prediction_models  # noqa: F401 - registers learning tables
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-config.set_main_option(
-    "sqlalchemy.url", get_settings().description_learning_database_url.replace("%", "%%")
-)
-target_metadata = DescriptionLearningBase.metadata
+
+config.set_main_option("sqlalchemy.url", get_settings().prediction_database_url.replace("%", "%%"))
+target_metadata = PredictionBase.metadata
 
 
 def run_migrations_offline() -> None:

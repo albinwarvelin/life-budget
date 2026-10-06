@@ -1,6 +1,8 @@
 import { ApprovedImportRow, ImportDraft } from "../../lib/api";
 
-export type EditableImportRow = ApprovedImportRow & Pick<ImportDraft,
+export type EditableImportRow = Omit<ApprovedImportRow, "transaction_type"> & {
+  transaction_type: ApprovedImportRow["transaction_type"] | "";
+} & Pick<ImportDraft,
   "raw_text" | "raw_amount_text" | "extraction_confidence" | "category_confidence" |
   "type_confidence" | "possible_duplicate" | "validation_errors"
   | "description_confidence"
@@ -17,7 +19,7 @@ export function toEditableImportRow(draft: ImportDraft): EditableImportRow {
     signed_amount: draft.signed_amount ?? "",
     currency_code: draft.currency_code,
     account_id: draft.account_id,
-    transaction_type: draft.predicted_transaction_type ?? "expense",
+    transaction_type: draft.predicted_transaction_type ?? "",
     category_id: draft.predicted_category_id,
     notes: "",
     raw_text: draft.raw_text,
@@ -33,8 +35,15 @@ export function toEditableImportRow(draft: ImportDraft): EditableImportRow {
 
 /** Strip OCR-only evidence before submitting final, user-confirmed values. */
 export function toApprovalRows(rows: EditableImportRow[]): ApprovedImportRow[] {
+  if (rows.some(row => row.accepted && !row.transaction_type)) {
+    throw new Error("Choose a transaction type for every included row.");
+  }
   return rows.map(({ raw_text: _raw, raw_amount_text: _amount, extraction_confidence: _ocr,
     category_confidence: _category, type_confidence: _type,
     description_confidence: _description, possible_duplicate: _duplicate,
-    validation_errors: _errors, ...approved }) => approved);
+    validation_errors: _errors, ...approved }) => ({
+      ...approved,
+      // Rejected rows need no reviewed type. This placeholder is never saved.
+      transaction_type: approved.transaction_type || "expense",
+    }));
 }

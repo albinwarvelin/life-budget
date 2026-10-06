@@ -100,6 +100,9 @@ class Transaction(Base):
     import_draft_id: Mapped[int | None] = mapped_column(
         ForeignKey("import_draft_rows.id", ondelete="SET NULL"), unique=True, index=True
     )
+    # Bank direction is independent of the ledger's magnitude convention.
+    # Legacy rows remain null; their reviewed type supplies an explicit fallback.
+    source_signed_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     attachment_filename: Mapped[str | None] = mapped_column(String(255))
     attachment_path: Mapped[str | None] = mapped_column(String(500))
     attachment_content_type: Mapped[str | None] = mapped_column(String(120))
@@ -181,3 +184,17 @@ class ImportDraftRow(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
 
     batch: Mapped[ImportBatch] = relationship(back_populates="drafts")
+
+
+class LearningOutbox(Base):
+    """Immutable reviewed snapshots queued atomically with financial mutations."""
+
+    __tablename__ = "learning_outbox"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(index=True)
+    operation: Mapped[str] = mapped_column(String(10), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())

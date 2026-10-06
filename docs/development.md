@@ -9,9 +9,7 @@ loaded from `backend/.env` or the repository-root `.env`.
 | --- | --- | --- |
 | `APP_ENV` | `development` | Enables integrated frontend serving when set to `production` |
 | `DATABASE_URL` | `sqlite:///./life_budget.db` | Financial database |
-| `LEARNING_DATABASE_URL` | `sqlite:///./life_budget_learning.db` | Category learner |
-| `TYPE_LEARNING_DATABASE_URL` | `sqlite:///./life_budget_type_learning.db` | Type learner |
-| `DESCRIPTION_LEARNING_DATABASE_URL` | `sqlite:///./life_budget_description_learning.db` | Description learner |
+| `PREDICTION_DATABASE_URL` | `sqlite:///./life_budget_predictions.db` | Replaceable reviewed-data prediction store |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | Allowed development browser origin |
 | `UPLOAD_DIR` | `uploads` | Local attachments and imported screenshots |
 | `TESSERACT_COMMAND` | `tesseract` | Tesseract executable or absolute path |
@@ -24,15 +22,13 @@ absolute paths instead.
 
 ## Databases and migrations
 
-SQLite is embedded and does not need a server process. There are four independent
+SQLite is embedded and does not need a server process. There are two independent
 database files and Alembic histories:
 
 ```powershell
 cd backend
 alembic upgrade head
-alembic -c alembic_learning.ini upgrade head
-alembic -c alembic_type_learning.ini upgrade head
-alembic -c alembic_description_learning.ini upgrade head
+alembic -c alembic_predictions.ini upgrade head
 ```
 
 Inspect them with `alembic current` or the same command plus the relevant `-c`
@@ -89,7 +85,7 @@ npm run build
 The frontend HTML coverage report is written to
 `frontend/coverage/index.html`.
 
-Pytest configures all four stores and uploads under a disposable temporary
+Pytest configures both stores and uploads under a disposable temporary
 directory before importing the application. Test merchants cannot be learned by
 your normal prediction databases.
 

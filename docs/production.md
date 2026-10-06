@@ -28,9 +28,7 @@ The default data directory is the existing development directory:
 ```text
 backend\\
   life_budget.db
-  life_budget_learning.db
-  life_budget_type_learning.db
-  life_budget_description_learning.db
+  life_budget_predictions.db
   uploads\
 ```
 
@@ -72,7 +70,7 @@ to be rewritten before moving the complete installation elsewhere.
 
 Stop Life Budget before taking a file-level backup. Copy these as one set:
 
-- All four `.db` files
+- Both `.db` files
 - The complete `uploads/` directory
 - Your `.env` file, if it contains required non-secret path configuration
 
@@ -103,5 +101,32 @@ one into a temporary directory and run:
 6. Run tests and builds.
 7. Start normally; the launcher applies pending migrations before Uvicorn.
 
-Never remove old Alembic revisions from an installation that already has a
-database.
+Keep the complete financial and active prediction migration histories. Legacy
+learner histories were retired with their stores; restoring those archives also
+requires the preceding application revision.
+
+## Rebuild and retire legacy learning
+
+Stop the application and use a new private backup directory outside the data
+folder. The command backs up the ledger and old stores with SQLite's backup API,
+checks backup integrity, migrates, rebuilds from current reviewed transactions,
+and verifies every pre-existing financial field by a hash comparison. The
+optional retirement flag removes only the three named legacy learning files
+after validation. It never removes the ledger or uploads.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.rebuild_learning --backup-dir C:\PrivateBackups\LifeBudget-20261005 --retire-legacy
+```
+
+Omit `--retire-legacy` to retain those files. The new learning database can also
+be regenerated if lost: the ledger/outbox contain the authority. Without an
+explicit rebuild, a newly created store seeds itself from current saved rows on
+first use. Rebuild after restoring an older ledger backup, so an existing
+projection cannot retain labels from a newer ledger. Do not restore only an
+old learner archive into the new application.
+
+To roll back this schema transition, stop the app, restore the archived financial
+file at its original path, and restore the preceding source revision and three
+legacy stores. Uploads stay at their existing paths. Archive files are sensitive
+and must remain private. Verify a restore copy with SQLite integrity checks.

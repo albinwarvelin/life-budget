@@ -1,11 +1,52 @@
 # Local configuration and data
 .env
+.env.*
+!.env.example
+
+# Both the ledger and prediction store contain private financial information.
+# SQLite sidecars and renamed/compressed backups can contain the same records.
+*.sqlite
 *.sqlite3
 *.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*
+*.sqlite.*
+*.sqlite3.*
+*.db.*
+
+# Keep raw imports, reviewed examples, OCR output and backup bundles local.
 media/
 uploads/
 screenshots/
 exports/
+data/
+private-data/
+backups/
+training-data/
+training_data/
+model-artifacts/
+model_artifacts/
+trained-models/
+trained_models/
+
+# Exported datasets and fitted models can expose names and transaction text.
+# JSON exports/snapshots belong in the private directories above; do not ignore
+# all JSON files because package manifests and source configuration need Git.
+*.csv
+*.tsv
+*.jsonl
+*.parquet
+*.feather
+*.xls
+*.xlsx
+*.ods
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.npy
+*.npz
 
 # Python
 __pycache__/

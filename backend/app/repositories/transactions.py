@@ -92,17 +92,3 @@ def list_balance_transactions(
         .order_by(Transaction.transaction_date, Transaction.id)
     )
     return list(db.scalars(statement))
-
-
-def save_transaction(db: Session, transaction: Transaction) -> Transaction:
-    """Insert or update a transaction and return its refreshed database state."""
-    db.add(transaction)
-    db.commit()
-    db.refresh(transaction)
-    return transaction
-
-
-def delete_transaction(db: Session, transaction: Transaction) -> None:
-    """Delete a transaction after the service has confirmed it may be deleted."""
-    db.delete(transaction)
-    db.commit()

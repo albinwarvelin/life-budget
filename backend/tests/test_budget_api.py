@@ -625,55 +625,96 @@ def test_category_suggestion_uses_all_merchant_words(client: TestClient) -> None
     assert prediction.json()[0]["category_id"] == category["id"]
 
 
-def test_learning_model_endpoint_exposes_safe_graph_snapshot(client: TestClient) -> None:
-    """The explorer receives connections and totals, but not raw event records."""
-    client.post("/api/v1/currencies", json={"code": "SEK", "name": "Swedish krona"})
-    account = client.post(
-        "/api/v1/accounts",
-        json={"name": "Everyday", "account_type": "bank", "currency_code": "SEK"},
-    ).json()
-    category = client.post(
-        "/api/v1/categories",
-        json={
-            "name": "Groceries",
-            "kind": "expense",
-            "localized_names": {"en": "Groceries", "sv": "Matvaror"},
-        },
-    ).json()
-    client.post(
-        "/api/v1/transactions",
-        json={
-            "transaction_date": "2026-07-18",
-            "account_id": account["id"],
-            "amount": "20.00",
-            "currency_code": "SEK",
-            "transaction_type": "expense",
-            "merchant": "ICA Kvantum",
-            "category_id": category["id"],
-        },
-    )
-
-    response = client.get("/api/v1/category-learning/model")
+def test_model_status_does_not_expose_training_rows(client: TestClient) -> None:
+    response = client.get("/api/v1/learning-models/status")
     assert response.status_code == 200
     body = response.json()
-    # The learning store deliberately outlives the isolated financial test DB,
-    # so only assert that at least this event has been retained.
-    assert body["event_count"] >= 1
-    assert body["categories"][0]["localized_names"]["sv"] == "Matvaror"
-    assert any(
-        pattern["pattern_type"] == "merchant_token" and pattern["pattern_text"] == "ica"
-        for pattern in body["patterns"]
-    )
-    assert body["scoring"]["signal_weights"]["merchant"] == 4.0
-    assert body["scoring"]["similarity_threshold"] == 0.72
-    assert "events" not in body
+    assert body["reviewed_transactions"] == 0
+    assert body["pending_updates"] == 0
+    assert set(body["heads"]) == {"type", "category", "description"}
+    assert "examples" not in body
+    assert "parameters" not in body
+    assert body["configuration"]["regularization_candidates"] == [0.25, 1.0, 4.0]
+    assert body["configuration"]["minimum_support"] == 3
+    assert body["heads"]["type"]["temperature"] == 1.0
+    assert body["heads"]["type"]["regularization"] == 1.0
+    assert body["snapshot_id"] is None
+    assert body["needs_retraining"] is True
+    assert body["report"] is None
 
 
-def test_explorer_exposes_category_type_and_description_models(client: TestClient) -> None:
-    """The frontend switcher receives one stable graph contract for every learner."""
-    for model_kind in ("category", "type", "description"):
-        response = client.get(f"/api/v1/learning-models/{model_kind}")
+def test_status_reads_never_initialize_or_train_a_model(client: TestClient, monkeypatch) -> None:
+    from app.prediction_db import PredictionSessionLocal
+    from app.prediction_models import ModelSnapshot, PredictionState
+    from sqlalchemy import select
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A status read must not fit or synchronize")
+
+    monkeypatch.setattr("app.services.predictions.train_models", forbidden)
+    monkeypatch.setattr("app.services.predictions.synchronize", forbidden)
+    for _ in range(2):
+        response = client.get("/api/v1/learning-models/status")
         assert response.status_code == 200
-        body = response.json()
-        assert body["model_kind"] == model_kind
-        assert set(body) == {"model_kind", "targets", "patterns", "event_count", "scoring"}
+        assert response.json()["snapshot_id"] is None
+    with PredictionSessionLocal() as learning:
+        assert learning.get(PredictionState, 1) is None
+        assert list(learning.scalars(select(ModelSnapshot))) == []
+
+
+def test_status_reports_reviewed_edits_without_retraining(client: TestClient, monkeypatch) -> None:
+    client.post("/api/v1/currencies", json={"code": "NOK", "name": "Norwegian krone"})
+    account = client.post(
+        "/api/v1/accounts",
+        json={"name": "Synthetic account", "account_type": "bank", "currency_code": "NOK"},
+    ).json()
+    payload = {
+        "transaction_date": "2026-01-01",
+        "account_id": account["id"],
+        "amount": "50.00",
+        "currency_code": "NOK",
+        "transaction_type": "income",
+        "merchant": "Synthetic Person",
+        "description": "Reviewed label",
+    }
+    transaction = client.post("/api/v1/transactions", json=payload).json()
+    before = client.post("/api/v1/learning-models/retrain")
+    assert before.status_code == 200
+    assert before.json()["needs_retraining"] is False
+    monkeypatch.setattr(
+        "app.services.predictions.train_models",
+        lambda *args: (_ for _ in ()).throw(AssertionError("Implicit retrain")),
+    )
+    changed = {**payload, "description": "Corrected label"}
+    assert client.put(f"/api/v1/transactions/{transaction['id']}", json=changed).status_code == 200
+    for _ in range(2):
+        status = client.get("/api/v1/learning-models/status").json()
+        assert status["snapshot_id"] == before.json()["snapshot_id"]
+        assert status["updates_since_training"] == 1
+        assert status["needs_retraining"] is True
+    assert (
+        client.post(
+            "/api/v1/learning-models/predict",
+            json={"merchant": "Synthetic Person", "amount": "50.00", "currency_code": "NOK"},
+        ).status_code
+        == 200
+    )
+    monkeypatch.undo()
+    after = client.post("/api/v1/learning-models/retrain").json()
+    assert after["snapshot_id"] != before.json()["snapshot_id"]
+    assert after["needs_retraining"] is False
+    assert after["updates_since_training"] == 0
+
+
+def test_prediction_tester_does_not_train_unapproved_input(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/learning-models/predict",
+        json={
+            "merchant": "Synthetic Person",
+            "amount": "50",
+            "currency_code": "NOK",
+        },
+    )
+    assert response.status_code == 200
+    assert all(output["suggestion"] is None for output in response.json()["outputs"].values())
+    assert client.get("/api/v1/learning-models/status").json()["reviewed_transactions"] == 0

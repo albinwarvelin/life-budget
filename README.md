@@ -13,7 +13,12 @@ not sent to an external service.
 - Local transaction attachments
 - Screenshot import with local Tesseract OCR and review-before-save
 - Explainable category, transaction-type, and description suggestions
-- Interactive learning-model explorer
+- Experimental model lab at `/settings/learning`: prediction flow, selected
+  hyperparameters, a synthetic probability playground, held-out evaluation,
+  and a read-only transaction prediction tester. Page loads never retrain;
+  use **Retrain model** to incorporate reviewed changes. Description prediction
+  supports a capped category blend selected on validation; category and
+  description suggestions use a 75% review threshold.
 
 The initial currency catalog contains SEK and NOK. Additional currencies can be
 added, but the application never converts or combines different currencies.
@@ -51,9 +56,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 alembic upgrade head
-alembic -c alembic_learning.ini upgrade head
-alembic -c alembic_type_learning.ini upgrade head
-alembic -c alembic_description_learning.ini upgrade head
+alembic -c alembic_predictions.ini upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -91,16 +94,14 @@ The script uses the existing development data directory by default:
 ```text
 backend\\
   life_budget.db
-  life_budget_learning.db
-  life_budget_type_learning.db
-  life_budget_description_learning.db
+  life_budget_predictions.db
   uploads\\
 ```
 
 The script:
 
 1. Creates the development data directories if needed.
-2. Runs all four database migration histories.
+2. Runs both database migration histories.
 3. Builds the frontend.
 4. Serves the frontend and API together at <http://127.0.0.1:8000>.
 
@@ -141,7 +142,7 @@ Tests use disposable databases and do not modify your financial or learning data
 - [Development, migrations, and tests](docs/development.md)
 - [Production use, backups, updates, and finalization](docs/production.md)
 - [Screenshot imports and learning models](docs/imports-and-learning.md)
-- [Proposed learning-model redesign](docs/learning-model-design.md)
+- [Learning-model design](docs/learning-model-design.md)
 
 ## Current limitations
 
@@ -150,10 +151,16 @@ Tests use disposable databases and do not modify your financial or learning data
 - Account balances are derived from recorded transactions; opening balances are
   not modeled yet. Each account's earliest recorded month therefore starts at zero
 - Screenshot OCR is heuristic and always requires review
-- Learning corrections are additive; editing or deleting a historical
-  transaction does not yet retract its previous learning event
+- Prediction scores are estimates; rare labels may have insufficient evidence for suggestions
 - Large transaction histories still need API pagination and server-side summary
   endpoints
 
 Never commit databases, screenshots, uploads, exports, `.env` files, or other
 personal financial data.
+The prediction database contains reviewed training examples and learned text
+and is private too. Git ignores database sidecars/backups, dataset exports and
+serialized model files. Keep JSON training exports and fitted-model snapshots
+inside `training-data/` or `model-artifacts/`, and other private files inside
+`private-data/`, `backups/`, `uploads/`, `screenshots/` or `exports/`. Ignore rules
+do not remove already tracked files; check staged changes before committing and
+use only synthetic data in test fixtures.

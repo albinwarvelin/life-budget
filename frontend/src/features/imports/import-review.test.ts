@@ -12,6 +12,12 @@ const draft: ImportDraft = {
 };
 
 describe("screenshot import review mapping", () => {
+  it("requires a reviewed type when the model abstains", () => {
+    const row = toEditableImportRow({ ...draft, predicted_transaction_type: null });
+    expect(row.transaction_type).toBe("");
+    expect(() => toApprovalRows([row])).toThrow("Choose a transaction type");
+    expect(toApprovalRows([{ ...row, accepted: false }])[0].accepted).toBe(false);
+  });
   it("keeps incomplete OCR fields editable with their validation errors", () => {
     const row = toEditableImportRow({ ...draft, transaction_date: null, signed_amount: null,
       validation_errors: ["Date could not be read", "Amount could not be read"] });

@@ -2,6 +2,8 @@ from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from PIL import Image, ImageDraw
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -16,11 +18,12 @@ from app.services.screenshot_imports import (
     process_screenshot_batch,
 )
 from app.services.screenshot_parser import OCRLine, parse_signed_decimal, parse_transaction_lines
-from app.services.type_learning import learn_transaction_type, predict_transaction_type
-from app.type_learning_db import TypeLearningBase
 
 
-def test_background_import_keeps_incomplete_and_duplicate_rows_for_review(monkeypatch) -> None:
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_background_import_keeps_incomplete_and_duplicate_rows_for_review(
+    monkeypatch, unavailable
+) -> None:
     """Extraction must create drafts only, including repeated and uncertain rows."""
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -39,6 +42,11 @@ def test_background_import_keeps_incomplete_and_duplicate_rows_for_review(monkey
     monkeypatch.setattr(
         "app.services.screenshot_imports.screenshot_parser.parse", lambda *args, **kwargs: extracted
     )
+    if unavailable:
+        monkeypatch.setattr(
+            "app.services.screenshot_imports.ensure_prediction_schema",
+            lambda: (_ for _ in ()).throw(RuntimeError("Unavailable")),
+        )
     with Session(engine) as db:
         db.add(Currency(code="NOK", name="Norwegian krone"))
         account = Account(name="Synthetic account", account_type="bank", currency_code="NOK")
@@ -63,7 +71,13 @@ def test_background_import_keeps_incomplete_and_duplicate_rows_for_review(monkey
         assert len(batch.drafts) == 3
         drafts = sorted(batch.drafts, key=lambda row: row.row_index)
         assert all(row.possible_duplicate for row in drafts[:2])
-        assert drafts[2].validation_errors == ["Date could not be read", "Amount could not be read"]
+        assert drafts[2].validation_errors == [
+            "Date could not be read",
+            "Amount could not be read",
+        ] + (["Predictions unavailable; review labels manually"] if unavailable else [])
+        if unavailable:
+            assert drafts[0].signed_amount == Decimal("-123.45")
+            assert drafts[0].predicted_transaction_type is None
         assert db.scalar(select(Transaction.id)) is None
     engine.dispose()
 
@@ -374,32 +388,6 @@ def test_recent_import_year_is_remembered_per_account() -> None:
         )
 
 
-def test_type_model_learns_sign_merchant_and_predicted_category() -> None:
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    TypeLearningBase.metadata.create_all(engine)
-    with Session(engine) as db:
-        before = predict_transaction_type(
-            db, amount=Decimal("500"), merchant="Internal move", category_id=8
-        )
-        assert before.transaction_type == "income"
-
-        for _ in range(3):
-            learn_transaction_type(
-                db,
-                amount=Decimal("500"),
-                merchant="Internal move",
-                category_id=8,
-                transaction_type="transfer",
-            )
-        after = predict_transaction_type(
-            db, amount=Decimal("500"), merchant="Internal move", category_id=8
-        )
-        assert after.transaction_type == "transfer"
-        assert after.confidence > 0.9
-
-
 def test_approval_preserves_raw_sign_but_stores_expense_magnitude(
     monkeypatch,
 ) -> None:
@@ -407,19 +395,7 @@ def test_approval_preserves_raw_sign_but_stores_expense_magnitude(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
-    learned: list[Decimal] = []
-    learned_descriptions: list[str | None] = []
-    monkeypatch.setattr(
-        "app.services.screenshot_imports.learn_from_transaction", lambda transaction: None
-    )
-    monkeypatch.setattr(
-        "app.services.screenshot_imports.record_type_learning_event",
-        lambda **values: learned.append(values["amount"]),
-    )
-    monkeypatch.setattr(
-        "app.services.screenshot_imports.record_description_learning_event",
-        lambda **values: learned_descriptions.append(values["description"]),
-    )
+    monkeypatch.setattr("app.services.screenshot_imports.try_synchronize", lambda db: None)
     with Session(engine, expire_on_commit=False) as db:
         db.add(Currency(code="SEK", name="Swedish krona"))
         account = Account(name="Everyday", account_type="bank", currency_code="SEK")
@@ -477,6 +453,11 @@ def test_approval_preserves_raw_sign_but_stores_expense_magnitude(
         assert transaction.amount == Decimal("245.50")
         assert transaction.source == "screenshot"
         assert transaction.import_draft_id == draft.id
-        assert learned == [Decimal("-245.50")]
-        assert learned_descriptions == ["Groceries"]
+        assert transaction.source_signed_amount == Decimal("-245.50")
+        from app.models.budget import LearningOutbox
+
+        event = db.scalar(select(LearningOutbox))
+        assert event.payload["direction"] == "outgoing"
+        assert event.payload["description"] == "Groceries"
+        assert event.payload["weight"] == 1.0
         assert draft.status == "accepted"

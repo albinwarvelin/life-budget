@@ -23,14 +23,7 @@ def test_approval_preserves_source_order_independent_of_payload_order(monkeypatc
     engine = create_database_engine("sqlite://", poolclass=StaticPool)
     Base.metadata.create_all(engine)
     # This test covers persistence and display, without teaching any model.
-    for function in (
-        "learn_from_transaction",
-        "record_type_learning_event",
-        "record_description_learning_event",
-    ):
-        monkeypatch.setattr(
-            f"app.services.screenshot_imports.{function}", lambda *args, **kwargs: None
-        )
+    monkeypatch.setattr("app.services.screenshot_imports.try_synchronize", lambda db: None)
     with Session(engine) as db:
         db.add(Currency(code="NOK", name="Norwegian krone"))
         account = Account(name="Synthetic bank", account_type="bank", currency_code="NOK")

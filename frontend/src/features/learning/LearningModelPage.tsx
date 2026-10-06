@@ -1,211 +1,157 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { api, ExplorerModel, LearningModelKind, Transaction } from "../../lib/api";
-import { calculateTargetProbabilities } from "../../lib/learning-model";
+import { api, LearningModelKind, LearningModelStatus } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { DescriptionPredictionTester } from "./DescriptionPredictionTester";
+import { ModelEvaluation } from "./ModelEvaluation";
+import { PredictionTester } from "./PredictionTester";
+import { ProbabilityPlayground } from "./ProbabilityPlayground";
 
-const palette = ["#2e6b5a", "#a86d32", "#5573a5", "#9a5274", "#6c7d32", "#7357a6"];
-const transactionTypes: Transaction["transaction_type"][] = [
-  "expense", "income", "reimbursement", "savings", "transfer",
-];
-
+const kinds: LearningModelKind[] = ["type", "category", "description"];
 const copy = {
   en: {
-    eyebrow: "Prediction intelligence", title: "Learning model explorer",
-    subtitle: "Inspect how remembered words, phrases and amount bands connect to predictions.",
-    back: "Back to settings", category: "Categories", type: "Types", description: "Descriptions",
-    events: "Learning events", connections: "Connections", phrases: "Stored signals", outputs: "Outputs",
-    map: "Interactive connection map", mapHint: "Switch models, then select a signal or connection to inspect its evidence.",
-    search: "Find a signal", allSignals: "All signal types", allAccounts: "All account scopes",
-    global: "Global only", allTypes: "All transaction types", observations: "Minimum observations",
-    noConnections: "No connections match these filters.", evidence: "Evidence distribution",
-    choosePhrase: "Choose a signal in the map to inspect its output probabilities.", weight: "weight",
-    seen: "observations", notCalibrated: "These are relative stored evidence scores, not calibrated real-world probabilities.",
-    scoring: "Scoring weights", fuzzy: "Fuzzy threshold", accountBoost: "Same-account multiplier", minimumConfidence: "Minimum suggestion confidence",
-    loading: "Loading model…", model: "Prediction model",
+    title: "Inside the learning model", subtitle: "Follow the evidence. Explore the uncertainty. See what your reviewed transactions teach the model.",
+    badge: "Experimental model lab", local: "Runs locally", back: "Settings", loading: "Loading the current model…", refresh: "Refresh status",
+    retrain: "Retrain model", training: "Training model…", stale: "Reviewed changes are waiting for training", fresh: "Model is up to date", noModel: "Not trained yet", lifecycle: "Opening or refreshing this page never retrains. Predictions reuse the active model until you retrain; the first prediction can initialize a missing model.", changes: "changed transactions", versionChange: "A model update or initial training is needed.", context: "Category probabilities → description (limited influence)", blend: "Selected category blend cap", bounded: "Direct + category context",
+    reviewed: "Reviewed transactions", pending: "Sync queue", snapshot: "Active snapshot", updated: "Built",
+    flow: "From transaction to suggestion", flowHint: "Select a stage to inspect what happens. Each output makes its own decision about whether there is enough evidence.",
+    stages: ["Observe", "Encode", "Predict", "Review"],
+    steps: [
+      { title: "Start with what was observed", body: "The model uses merchant or person, signed amount, currency and account. Direction means money coming in, going out, zero, or an unknown original sign. A positive amount does not automatically mean salary.", formula: "x = merchant + |amount| + direction + currency + account", note: "Description is a reviewed target to learn, not an OCR input to this predictor. Date is preserved for the transaction but is not a model feature." },
+      { title: "Turn evidence into shared features", body: "Word and character fragments capture repeated names and spelling patterns. Smooth amount features let nearby amounts share evidence within the same currency and direction. Name shape is a weak clue learned alongside other features.", formula: "amount basis = exp(−½ ((log(1 + |amount|) − centre) / width)²)", note: "There is no hardcoded rule that a person sending 50 NOK must mean Car. The reviewed examples determine the learned associations." },
+      { title: "Direct evidence with limited category context", body: "Category averages over possible types. Description blends a direct transaction expert with a category-conditioned expert, averaged over every possible category. Uncertain categories contribute less. The blend cap is selected on validation and cannot exceed 50%.", formula: "P(description | x) = (1 − w) Pdirect + w Σcategory P(category | x) Pcontext(description | x, category)", note: "Category is useful context, not a confirmed fact. Its weight falls with category uncertainty; unsupported categories fall back to direct evidence. Context is enabled only when validation improves log loss without reducing top-one accuracy." },
+      { title: "Review closes the learning loop", body: "Each output must pass its own probability threshold and minimum example support. Uncertain candidates remain alternatives. Only confirmed transactions become training examples; later edits and deletions update that example instead of accumulating extra votes.", formula: "suggest if probability ≥ threshold and reviewed support ≥ minimum", note: "Every import still needs confirmation. The experiment and transaction tester on this page do not save records or provide training feedback." },
+    ],
+    observed: "Observed fields", features: "Shared features", type: "Type", category: "Category", description: "Description",
+    independent: "Independent", mixture: "Weighted type mixture", confirmation: "Your confirmation → reviewed ledger → explicit retraining",
+    settings: "Active model settings", settingsHint: "C and temperature are chosen on validation. Category and description use your configured 75% suggestion policy. Values below belong to the active snapshot.",
+    labels: "Learned labels", c: "C · inverse regularization", temperature: "Temperature", directTemperature: "Direct expert temperature", threshold: "Suggestion threshold", off: "Alternatives only", calibrated: "Score temperature fitted on validation", uncalibrated: "Final scores not validation-calibrated",
+    parameters: "Adjustment guide", parameterHint: "These are code settings, not live controls. A change needs a rebuild and fresh evaluation; changing feature construction also requires a new algorithm version.",
+    parameter: "Control", value: "Current configuration", effect: "What it changes",
+    parameterRows: [
+      ["C candidates", "Lower C penalizes large coefficients more strongly. Higher C fits the reviewed examples more closely. Requires retraining."],
+      ["Temperature candidates", "Higher temperature spreads probabilities; lower temperature concentrates them. Choose it on validation data."],
+      ["Suggestion policy", "Type uses automatic threshold selection. Category and description use the configured review threshold, with measured precision reported rather than guaranteed."],
+      ["Evidence policy", "Every winning label needs minimum support. The Wilson lower bound applies to automatic type-threshold selection, not your category/description overrides."],
+      ["Text features", "Word/character fragment sizes and vocabulary limits trade detail against overfitting and model size. Requires retraining."],
+      ["Amount smoothing", "More centres add detail. Wider bases let more nearby amounts share evidence. Requires retraining."],
+      ["Chronological split", "Whole import groups stay together. Earlier groups train; validation selects settings; later groups test."],
+      ["Description blend", "A capped, entropy-damped blend of direct and category-conditioned experts. Requires validation improvement and enough validation rows; otherwise direct evidence remains active."],
+    ],
+    support: "examples per label", validation: "validation examples", precision: "precision lower bound", word: "word", character: "character", centres: "centres", width: "width", train: "train", validate: "validation", test: "test",
+    weights: "Current reviewed transactions each have weight 1. Repeated model testing adds no examples. Suggestion-origin weighting would need a separately evaluated training policy.",
+    evaluation: "Check the evidence", evaluationHint: "Held-out evaluation, calibration bins and performance on unseen names. Expand to inspect the numbers.",
   },
   sv: {
-    eyebrow: "Prediktionsintelligens", title: "Utforska inlärningsmodeller",
-    subtitle: "Se hur sparade ord, fraser och beloppsintervall kopplas till förutsägelser.",
-    back: "Tillbaka till inställningar", category: "Kategorier", type: "Typer", description: "Beskrivningar",
-    events: "Inlärningshändelser", connections: "Kopplingar", phrases: "Sparade signaler", outputs: "Resultat",
-    map: "Interaktiv kopplingskarta", mapHint: "Byt modell och välj sedan en signal eller koppling för att granska bevisen.",
-    search: "Sök efter en signal", allSignals: "Alla signaltyper", allAccounts: "Alla kontoomfång",
-    global: "Endast globalt", allTypes: "Alla transaktionstyper", observations: "Minsta antal observationer",
-    noConnections: "Inga kopplingar matchar filtren.", evidence: "Bevisfördelning",
-    choosePhrase: "Välj en signal i kartan för att se sannolikheterna för dess resultat.", weight: "vikt",
-    seen: "observationer", notCalibrated: "Detta är relativa bevispoäng, inte kalibrerade verkliga sannolikheter.",
-    scoring: "Poängvikter", fuzzy: "Tröskel för ungefärlig matchning", accountBoost: "Multiplikator för samma konto", minimumConfidence: "Minsta förslagskonfidens",
-    loading: "Läser modellen…", model: "Prediktionsmodell",
+    title: "Så fungerar inlärningsmodellen", subtitle: "Följ underlaget. Utforska osäkerheten. Se vad granskade transaktioner lär modellen.",
+    badge: "Experimentellt modellabb", local: "Körs lokalt", back: "Inställningar", loading: "Läser den aktuella modellen…", refresh: "Uppdatera status",
+    retrain: "Träna om modellen", training: "Tränar modellen…", stale: "Granskade ändringar väntar på träning", fresh: "Modellen är uppdaterad", noModel: "Inte tränad än", lifecycle: "Att öppna eller uppdatera sidan tränar aldrig om modellen. Förutsägelser använder den aktiva modellen tills du tränar om; den första förutsägelsen kan skapa en saknad modell.", changes: "ändrade transaktioner", versionChange: "En modelluppdatering eller första träning behövs.", context: "Kategorisannolikheter → beskrivning (begränsat inflytande)", blend: "Vald övre gräns för kategoriblandning", bounded: "Direkt + kategorikontext",
+    reviewed: "Granskade transaktioner", pending: "Synkkö", snapshot: "Aktiv version", updated: "Byggd",
+    flow: "Från transaktion till förslag", flowHint: "Välj ett steg för att se vad som händer. Varje utdata avgör själv om underlaget räcker.",
+    stages: ["Observera", "Koda", "Förutsäg", "Granska"],
+    steps: [
+      { title: "Börja med det som observerats", body: "Modellen använder handlare eller person, signerat belopp, valuta och konto. Riktning betyder inkommande, utgående, noll eller okänt ursprungligt tecken. Ett positivt belopp betyder inte automatiskt lön.", formula: "x = handlare + |belopp| + riktning + valuta + konto", note: "Beskrivning är ett granskat mål att lära sig, inte OCR-indata till modellen. Datum bevaras för transaktionen men är inte en modellvariabel." },
+      { title: "Gör underlaget till gemensamma variabler", body: "Ord- och teckenfragment fångar återkommande namn och stavningsmönster. Mjuka beloppsvariabler låter närliggande belopp dela underlag inom samma valuta och riktning. Namnform är en svag ledtråd som lärs tillsammans med andra variabler.", formula: "beloppsbas = exp(−½ ((log(1 + |belopp|) − centrum) / bredd)²)", note: "Ingen hårdkodad regel säger att en person som skickar 50 NOK måste betyda Bil. Granskade exempel bestämmer de inlärda sambanden." },
+      { title: "Direkt underlag med begränsad kategorikontext", body: "Kategori väger ihop möjliga typer. Beskrivning blandar en direkt transaktionsexpert med en kategoriberoende expert, viktad över alla möjliga kategorier. Osäkra kategorier bidrar mindre. Gränsen väljs på valideringsdata och kan inte överstiga 50%.", formula: "P(beskrivning | x) = (1 − w) Pdirekt + w Σkategori P(kategori | x) Pkontext(beskrivning | x, kategori)", note: "Kategori är användbar kontext, inte ett bekräftat faktum. Dess vikt minskar vid osäkerhet; kategorier utan underlag använder direkt evidens. Kontext aktiveras bara om valideringen förbättrar log loss utan sämre träffsäkerhet." },
+      { title: "Granskning sluter lärandets krets", body: "Varje utdata måste klara sin egen sannolikhetströskel och ha tillräckligt många granskade exempel. Osäkra kandidater visas som alternativ. Bara bekräftade transaktioner blir träningsexempel; ändringar och borttagningar uppdaterar exemplet i stället för att lägga till extra röster.", formula: "föreslå om sannolikhet ≥ tröskel och granskat underlag ≥ minimum", note: "Varje import måste fortfarande bekräftas. Experimentet och transaktionstestet på denna sida sparar inga poster och ger ingen träningsåterkoppling." },
+    ],
+    observed: "Observerade fält", features: "Gemensamma variabler", type: "Typ", category: "Kategori", description: "Beskrivning",
+    independent: "Oberoende", mixture: "Viktad blandning av typer", confirmation: "Din bekräftelse → granskade poster → uttrycklig omträning",
+    settings: "Aktiva modellinställningar", settingsHint: "C och temperatur väljs på valideringsdata. Kategori och beskrivning använder din förslagspolicy på 75%. Värdena nedan tillhör den aktiva modellen.",
+    labels: "Inlärda etiketter", c: "C · invers regularisering", temperature: "Temperatur", directTemperature: "Direktexpertens temperatur", threshold: "Förslagströskel", off: "Endast alternativ", calibrated: "Poängtemperatur anpassad på valideringsdata", uncalibrated: "Slutpoängen är inte valideringskalibrerad",
+    parameters: "Guide till justeringar", parameterHint: "Detta är kodinställningar, inte direktreglage. En ändring kräver ombyggnad och ny utvärdering; ändrad variabelkonstruktion kräver också en ny algoritmversion.",
+    parameter: "Inställning", value: "Aktuell konfiguration", effect: "Vad den ändrar",
+    parameterRows: [
+      ["C-kandidater", "Lägre C straffar stora koefficienter mer. Högre C anpassar modellen mer till granskade exempel. Kräver omträning."],
+      ["Temperaturkandidater", "Högre temperatur sprider sannolikheter; lägre koncentrerar dem. Väljs på valideringsdata."],
+      ["Förslagspolicy", "Typ använder automatiskt tröskelval. Kategori och beskrivning använder den konfigurerade granskningströskeln, med uppmätt precision utan garanti."],
+      ["Underlagskrav", "Varje vinnande etikett behöver ett minsta underlag. Wilson-gränsen gäller automatiskt typtröskelval, inte dina kategori- och beskrivningströsklar."],
+      ["Textvariabler", "Storlek på ord- och teckenfragment samt ordförråd balanserar detalj mot överanpassning och modellstorlek. Kräver omträning."],
+      ["Beloppsutjämning", "Fler centrum ger mer detalj. Bredare baser låter fler närliggande belopp dela underlag. Kräver omträning."],
+      ["Kronologisk uppdelning", "Hela importgrupper hålls ihop. Tidiga grupper tränar; validering väljer inställningar; senare grupper testar."],
+      ["Beskrivningsblandning", "Begränsad, entropidämpad blandning av direkt och kategoriberoende expert. Kräver bättre validering och tillräckligt många valideringsrader; annars används direkt underlag."],
+    ],
+    support: "exempel per etikett", validation: "valideringsexempel", precision: "undre precisionsgräns", word: "ord", character: "tecken", centres: "centrum", width: "bredd", train: "träning", validate: "validering", test: "test",
+    weights: "Varje granskad transaktion har vikt 1. Upprepade modelltest lägger inte till exempel. Viktning efter förslagens ursprung skulle kräva en separat utvärderad träningspolicy.",
+    evaluation: "Granska underlaget", evaluationHint: "Utvärdering på undanhållen data, kalibrering och resultat för nya namn. Expandera för att se siffrorna.",
   },
-} as const;
+};
 
-type PhraseNode = { key: string; type: string; patternText: string; text: string; weight: number };
+/** Values come from the training service, so the guide cannot drift from its grids. */
+function ParameterGuide({ status }: { status: LearningModelStatus }) {
+  const { locale } = useI18n();
+  const c = copy[locale];
+  const config = status.configuration;
+  const values = [
+    config.regularization_candidates.join(" / "), config.temperature_candidates.join(" / "),
+    `${c.type}: ${config.threshold_candidates.map(value => `${Math.round(value * 100)}%`).join(" / ")}; ${c.category}: ${Math.round((config.suggestion_thresholds.category ?? 0.75) * 100)}%; ${c.description}: ${Math.round((config.suggestion_thresholds.description ?? 0.75) * 100)}%`,
+    `${config.minimum_support} ${c.support} · ${config.minimum_validation_samples} ${c.validation} · ${Math.round(config.target_precision * 100)}% ${c.precision} (z = ${config.wilson_z})`,
+    `${c.word}: ${config.word_ngram_range.join("–")} / ${config.word_features}; ${c.character}: ${config.character_ngram_range.join("–")} / ${config.character_features}`,
+    `${config.amount_centers} ${c.centres} · ${c.width} ${config.amount_width} (log)`,
+    `${Math.round(config.train_fraction * 100)}% ${c.train} / ${Math.round(config.validation_fraction * 100)}% ${c.validate} / ${Math.round((1 - config.train_fraction - config.validation_fraction) * 100)}% ${c.test}`,
+    `${config.description_blend_candidates.map(value => `${Math.round(value * 100)}%`).join(" / ")} · ${config.description_context_min_rows} ${c.validation}`,
+  ];
+  return <details className="card lab-details">
+    <summary><span>{c.parameters}</span><span className="lab-expand" aria-hidden="true">+</span></summary>
+    <p className="lab-help">{c.parameterHint}</p>
+    <div className="overflow-x-auto"><table className="lab-parameter-table"><thead><tr><th>{c.parameter}</th><th>{c.value}</th><th>{c.effect}</th></tr></thead><tbody>{c.parameterRows.map(([label, explanation], index) => <tr key={label}><th scope="row">{label}</th><td>{values[index]}</td><td>{explanation}</td></tr>)}</tbody></table></div>
+    <p className="lab-footnote">{c.weights}</p>
+  </details>;
+}
 
 export function LearningModelPage() {
   const { locale } = useI18n();
   const c = copy[locale];
-  const [modelKind, setModelKind] = useState<LearningModelKind>("category");
-  const model = useQuery({
-    queryKey: ["learning-model", modelKind],
-    queryFn: () => api.getExplorerModel(modelKind),
-  });
-  const accounts = useQuery({ queryKey: ["accounts"], queryFn: api.listAccounts });
-  const categories = useQuery({ queryKey: ["categories"], queryFn: api.listCategories });
-  const [search, setSearch] = useState("");
-  const [signal, setSignal] = useState("all");
-  const [accountScope, setAccountScope] = useState("all");
-  const [transactionType, setTransactionType] = useState("all");
-  const [minimumObservations, setMinimumObservations] = useState(1);
-  const [selectedPhrase, setSelectedPhrase] = useState<string | null>(null);
+  const [stage, setStage] = useState(2);
+  const queryClient = useQueryClient();
+  const model = useQuery({ queryKey: ["learning-model-status"], queryFn: api.getLearningModelStatus, staleTime: 0 });
+  // Status reads never fit. Only this explicit mutation replaces a snapshot.
+  const retrain = useMutation({ mutationFn: api.retrainLearningModels, onSuccess: data => queryClient.setQueryData(["learning-model-status"], data) });
+  const selected = c.steps[stage];
 
-  useEffect(() => {
-    setSelectedPhrase(null);
-    setSignal("all");
-  }, [modelKind]);
-
-  const filteredPatterns = useMemo(() => {
-    const needle = search.trim().toLocaleLowerCase();
-    return (model.data?.patterns ?? []).filter((pattern) =>
-      (!needle || pattern.pattern_text.toLocaleLowerCase().includes(needle) ||
-        (pattern.localized_display_texts?.[locale] ?? pattern.display_text ?? "").toLocaleLowerCase().includes(needle)) &&
-      (signal === "all" || pattern.pattern_type === signal) &&
-      (modelKind !== "category" || accountScope === "all" ||
-        (accountScope === "global" ? pattern.account_id === null : pattern.account_id === Number(accountScope))) &&
-      (modelKind !== "category" || transactionType === "all" || pattern.transaction_type === transactionType) &&
-      pattern.observations >= minimumObservations,
-    );
-  }, [model.data, search, signal, modelKind, accountScope, transactionType, minimumObservations, locale]);
-
-  const graph = useMemo(() => {
-    const totals = new Map<string, PhraseNode>();
-    for (const pattern of filteredPatterns) {
-      const key = `${pattern.pattern_type}:${pattern.pattern_text}`;
-      const displayText = pattern.localized_display_texts?.[locale] ?? pattern.display_text ?? pattern.pattern_text;
-      const node = totals.get(key) ?? { key, type: pattern.pattern_type, patternText: pattern.pattern_text, text: displayText, weight: 0 };
-      node.weight += pattern.weight;
-      totals.set(key, node);
-    }
-    const phrases = [...totals.values()].sort((left, right) => right.weight - left.weight).slice(0, 24);
-    const keys = new Set(phrases.map((phrase) => phrase.key));
-    const edges = filteredPatterns.filter((pattern) => keys.has(`${pattern.pattern_type}:${pattern.pattern_text}`)).slice(0, 100);
-    const targetKeys = [...new Set(edges.map((pattern) => pattern.target_key))];
-    return { phrases, edges, targetKeys };
-  }, [filteredPatterns, locale]);
-
-  useEffect(() => {
-    if (selectedPhrase && !graph.phrases.some((phrase) => phrase.key === selectedPhrase)) {
-      setSelectedPhrase(null);
-    }
-  }, [graph.phrases, selectedPhrase]);
-
-  if (model.isLoading) return <div className="grid min-h-[55vh] place-items-center text-muted">{c.loading}</div>;
-  if (model.isError) return <div className="alert error-alert">{(model.error as Error).message}</div>;
-
-  const data = model.data!;
-  const targetMap = new Map(data.targets.map((target) => [target.key, target]));
-  const targetName = (key: string) => {
-    const target = targetMap.get(key);
-    return target?.localized_names?.[locale] ?? target?.localized_names?.en ?? target?.label ?? key;
-  };
-  const selectedNode = graph.phrases.find((phrase) => phrase.key === selectedPhrase);
-  const evidence = selectedNode
-    ? calculateTargetProbabilities(filteredPatterns, selectedNode.type, selectedNode.patternText)
-    : [];
-  const signalTypes = [...new Set(data.patterns.map((pattern) => pattern.pattern_type))].sort();
-  const uniquePhraseCount = new Set(data.patterns.map((pattern) => `${pattern.pattern_type}:${pattern.pattern_text}`)).size;
-  const graphHeight = Math.max(500, Math.max(graph.phrases.length, graph.targetKeys.length) * 42 + 90);
-  const phraseY = (index: number) => 65 + index * ((graphHeight - 120) / Math.max(graph.phrases.length - 1, 1));
-  const targetY = (index: number) => 65 + index * ((graphHeight - 120) / Math.max(graph.targetKeys.length - 1, 1));
-
-  return <div className="space-y-7">
-    <header className="flex flex-wrap items-end justify-between gap-5">
-      <div><p className="eyebrow">{c.eyebrow}</p><h1>{c.title}</h1><p className="page-subtitle max-w-2xl">{c.subtitle}</p></div>
-      <Link className="secondary-button no-underline" to="/settings">← {c.back}</Link>
+  const status = model.data;
+  return <main className="model-lab">
+    <header className="lab-hero">
+      <div className="lab-section-heading"><span className="lab-hero-badge">{c.badge}</span><Link to="/settings" className="lab-hero-link">← {c.back}</Link></div>
+      <h1>{c.title}</h1><p>{c.subtitle}</p>
+      <div className="lab-hero-footer"><span><span className="status-dot" />{c.local}</span><button onClick={() => model.refetch()} disabled={model.isFetching}>{model.isFetching ? c.loading : c.refresh} ↻</button></div>
     </header>
-
-    <div className="flex flex-wrap gap-2" role="group" aria-label={c.model}>
-      {(["category", "type", "description"] as LearningModelKind[]).map((kind) =>
-        <button key={kind} type="button" className={kind === modelKind ? "primary-button" : "secondary-button"} onClick={() => setModelKind(kind)}>
-          {c[kind]}
-        </button>)}
-    </div>
-
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {[[c.events, data.event_count], [c.connections, data.patterns.length], [c.phrases, uniquePhraseCount], [c.outputs, data.targets.length]].map(([label, value]) =>
-        <div className="card overflow-hidden p-5" key={label}><p className="text-xs font-bold uppercase tracking-[.12em] text-[#668277]">{label}</p><strong className="mt-2 block text-3xl text-forest">{value}</strong></div>)}
-    </div>
-
-    {modelKind === "description" && <DescriptionPredictionTester categories={categories.data ?? []} locale={locale} />}
-
-    <section className="card overflow-hidden">
-      <div className="border-b border-[#e2ebe4] bg-gradient-to-r from-[#f6fbf6] to-white p-6">
-        <p className="eyebrow">{c[modelKind]}</p><h2>{c.map}</h2><p className="page-subtitle">{c.mapHint}</p>
-        <div className={`mt-5 grid gap-3 md:grid-cols-2 ${modelKind === "category" ? "xl:grid-cols-5" : "xl:grid-cols-3"}`}>
-          <label>{c.search}<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ICA, coffee…" /></label>
-          <label>{c.scoring}<select value={signal} onChange={(event) => setSignal(event.target.value)}><option value="all">{c.allSignals}</option>{signalTypes.map((item) => <option key={item}>{item}</option>)}</select></label>
-          {modelKind === "category" && <label>{c.allAccounts}<select value={accountScope} onChange={(event) => setAccountScope(event.target.value)}><option value="all">{c.allAccounts}</option><option value="global">{c.global}</option>{accounts.data?.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></label>}
-          {modelKind === "category" && <label>{c.allTypes}<select value={transactionType} onChange={(event) => setTransactionType(event.target.value)}><option value="all">{c.allTypes}</option>{transactionTypes.map((item) => <option key={item}>{item}</option>)}</select></label>}
-          <label>{c.observations}<input type="number" min="1" value={minimumObservations} onChange={(event) => setMinimumObservations(Math.max(1, Number(event.target.value)))} /></label>
+    {model.isPending && <p role="status">{c.loading}</p>}
+    {model.isError && <div role="alert" className="alert error-alert">{model.error.message}<button className="secondary-button ml-3" onClick={() => model.refetch()}>{c.refresh}</button></div>}
+    {retrain.isError && <div role="alert" className="alert error-alert">{retrain.error.message}</div>}
+    {status && <section className="card p-5"><div className="lab-section-heading"><div><strong className="text-forest">{status.needs_retraining ? c.stale : c.fresh}</strong><p className="lab-help mb-0">{status.updates_since_training} {c.changes}{status.needs_retraining && !status.updates_since_training ? ` · ${c.versionChange}` : ""}</p></div><button className="primary-button" onClick={() => retrain.mutate()} disabled={retrain.isPending}>{retrain.isPending ? c.training : c.retrain}</button></div><p className="lab-footnote">{c.lifecycle}</p></section>}
+    {status && <div className="lab-stats">
+      <div><span>{c.reviewed}</span><strong>{status.reviewed_transactions.toLocaleString(locale)}</strong></div>
+      <div><span>{c.pending}</span><strong>{status.pending_updates}</strong></div>
+      <div><span>{c.snapshot}</span><strong className="lab-version">{status.snapshot_id == null ? c.noModel : `${status.algorithm} · #${status.snapshot_id}`}</strong></div>
+      <div><span>{c.updated}</span><strong className="lab-version">{status.created_at ? new Date(`${status.created_at.replace(/Z$/, "")}Z`).toLocaleDateString(locale) : "—"}</strong></div>
+    </div>}
+    <div className="lab-explore-grid">
+      <section className="card lab-flow">
+        <span className="lab-kicker">01 / {c.flow}</span><h2>{c.flow}</h2><p className="lab-help">{c.flowHint}</p>
+        <div className="lab-stages" role="group" aria-label={c.flow}>{c.stages.map((name, index) => <button key={name} aria-pressed={stage === index} onClick={() => setStage(index)}><span>{String(index + 1).padStart(2, "0")}</span>{name}</button>)}</div>
+        <div className="lab-flow-diagram" aria-label={c.flow}>
+          <div className="lab-flow-node">{c.observed}</div><div className="lab-flow-arrow" aria-hidden="true">↓</div><div className="lab-flow-node">{c.features}</div>
+          <div className="lab-flow-branches"><div><span aria-hidden="true">↓</span><strong>{c.type}</strong><small>{c.independent}</small><span aria-hidden="true">↓</span><strong className="lab-category-node">{c.category}</strong><small>{c.mixture}</small></div><div><span aria-hidden="true">↓</span><strong>{c.description}</strong><small>{c.bounded}</small></div></div><p className="lab-footnote">{c.context}</p>
+          <div className="lab-flow-feedback">{c.confirmation}</div>
         </div>
-      </div>
-
-      {!graph.edges.length ? <div className="p-12 text-center text-muted">{c.noConnections}</div> :
-        <div className="grid xl:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="min-w-0 overflow-auto bg-[radial-gradient(circle_at_center,#edf4ef_1px,transparent_1px)] [background-size:22px_22px]">
-            <svg className="min-w-[860px] w-full" viewBox={`0 0 1000 ${graphHeight}`} role="img" aria-label={`${c.map}: ${c[modelKind]}`}>
-              <text x="70" y="28" className="fill-[#668277] text-[11px] font-bold uppercase tracking-widest">{c.phrases}</text>
-              <text x="790" y="28" className="fill-[#668277] text-[11px] font-bold uppercase tracking-widest">{c.outputs}</text>
-              {graph.edges.map((edge) => {
-                const key = `${edge.pattern_type}:${edge.pattern_text}`;
-                const left = graph.phrases.findIndex((phrase) => phrase.key === key);
-                const right = graph.targetKeys.indexOf(edge.target_key);
-                const focused = !selectedPhrase || selectedPhrase === key;
-                const edgeLabel = edge.localized_display_texts?.[locale] ?? edge.display_text ?? edge.pattern_text;
-                return <path key={edge.id} d={`M 285 ${phraseY(left)} C 470 ${phraseY(left)}, 530 ${targetY(right)}, 715 ${targetY(right)}`} fill="none" stroke={palette[right % palette.length]} strokeWidth={Math.min(8, 1 + Math.sqrt(edge.weight))} opacity={focused ? .62 : .07} className="cursor-pointer transition-opacity" onClick={() => setSelectedPhrase(key)}><title>{`${edgeLabel} → ${targetName(edge.target_key)} · ${edge.weight.toFixed(2)}`}</title></path>;
-              })}
-              {graph.phrases.map((phrase, index) => {
-                const selected = phrase.key === selectedPhrase;
-                return <g key={phrase.key} role="button" tabIndex={0} aria-label={phrase.text} className="cursor-pointer outline-none" onClick={() => setSelectedPhrase(selected ? null : phrase.key)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedPhrase(selected ? null : phrase.key); }}>
-                  <rect x="55" y={phraseY(index) - 18} width="230" height="36" rx="11" fill={selected ? "#173a32" : "white"} stroke={selected ? "#173a32" : "#cadbd0"} strokeWidth={selected ? 2 : 1} />
-                  <text x="70" y={phraseY(index) + 4} fill={selected ? "white" : "#203a31"} className="text-[12px] font-semibold">{phrase.text.length > 26 ? `${phrase.text.slice(0, 25)}…` : phrase.text}</text>
-                  <title>{`${phrase.type}: ${phrase.text}`}</title>
-                </g>;
-              })}
-              {graph.targetKeys.map((key, index) => <g key={key}>
-                <circle cx="735" cy={targetY(index)} r="7" fill={palette[index % palette.length]} />
-                <rect x="753" y={targetY(index) - 18} width="205" height="36" rx="11" fill="white" stroke="#cadbd0" />
-                <text x="769" y={targetY(index) + 4} className="fill-[#203a31] text-[12px] font-bold">{shorten(targetName(key), 25)}</text>
-                <title>{targetName(key)}</title>
-              </g>)}
-            </svg>
-          </div>
-          <aside className="border-t border-[#e2ebe4] bg-[#fbfdfb] p-6 xl:border-l xl:border-t-0">
-            <p className="eyebrow">{c.evidence}</p><h2 className="break-words">{selectedNode?.text ?? c.evidence}</h2><p className="page-subtitle mb-5">{selectedNode ? selectedNode.type : c.choosePhrase}</p>
-            <div className="space-y-5">{evidence.map((item, index) => <div key={item.targetKey}>
-              <div className="mb-1 flex items-center justify-between gap-3 text-sm"><strong>{targetName(item.targetKey)}</strong><span className="font-bold">{(item.probability * 100).toFixed(1)}%</span></div>
-              <div className="h-2 overflow-hidden rounded-full bg-[#e4ece6]"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${item.probability * 100}%`, backgroundColor: palette[index % palette.length] }} /></div>
-              <p className="mt-1 text-xs text-muted">{item.weight.toFixed(2)} {c.weight} · {item.observations} {c.seen}</p>
-            </div>)}</div>
-            {selectedNode && <p className="mt-7 rounded-xl bg-[#edf5ef] p-4 text-xs leading-5 text-[#4f695f]">{c.notCalibrated}</p>}
-          </aside>
-        </div>}
-    </section>
-
-    <ScoringCard model={data} text={c} />
-  </div>;
-}
-
-function shorten(value: string, length: number) {
-  return value.length > length ? `${value.slice(0, length - 1)}…` : value;
-}
-
-function ScoringCard({ model, text }: { model: ExplorerModel; text: typeof copy.en | typeof copy.sv }) {
-  return <section className="card p-6"><p className="eyebrow">{text[model.model_kind]}</p><h2>{text.scoring}</h2>
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(model.scoring.signal_weights).map(([key, value]) => <div className="flex items-center justify-between rounded-xl bg-[#f4f8f4] px-4 py-3" key={key}><code className="text-xs text-[#45655a]">{key}</code><strong>{value.toFixed(2)}×</strong></div>)}</div>
-    <div className="mt-5 flex flex-wrap gap-3"><div className="rounded-xl bg-[#e9f2eb] p-4 text-forest"><small className="block">{text.fuzzy}</small><strong className="mt-1 block text-2xl">{Math.round(model.scoring.similarity_threshold * 100)}%</strong></div>{model.scoring.minimum_confidence !== null && <div className="rounded-xl bg-[#e9f2eb] p-4 text-forest"><small className="block">{text.minimumConfidence}</small><strong className="mt-1 block text-2xl">{Math.round(model.scoring.minimum_confidence * 100)}%</strong></div>}{model.scoring.account_multiplier && <div className="rounded-xl bg-[#173a32] p-4 text-white"><small className="block text-[#b7d8c5]">{text.accountBoost}</small><strong className="mt-1 block text-2xl">{model.scoring.account_multiplier.toFixed(2)}×</strong></div>}</div>
-  </section>;
+        <article className="lab-step-explanation" aria-live="polite"><h3>{selected.title}</h3><p>{selected.body}</p><code>{selected.formula}</code><p className="lab-footnote">{selected.note}</p></article>
+      </section>
+      <ProbabilityPlayground minimumSupport={status?.configuration.minimum_support ?? 3} />
+    </div>
+    {status?.snapshot_id != null && <>
+      <section aria-labelledby="lab-settings-title"><div className="lab-section-heading"><div><span className="lab-kicker">02 / {c.settings}</span><h2 id="lab-settings-title">{c.settings}</h2></div></div><p className="lab-help">{c.settingsHint}</p>
+        <div className="lab-heads">{kinds.map(kind => {
+          const head = status.heads[kind];
+          return <article className="card lab-head" key={kind}><div className="lab-section-heading"><h3>{c[kind]}</h3><span className={`lab-head-badge ${head.threshold > 1 ? "lab-head-off" : ""}`}>{head.threshold > 1 ? c.off : `${Math.round(head.threshold * 100)}%`}</span></div>
+            <dl><div><dt>{c.c}</dt><dd>{head.regularization}</dd></div><div><dt>{kind === "description" ? c.directTemperature : c.temperature}</dt><dd>{head.temperature}</dd></div><div><dt>{c.labels}</dt><dd>{head.labels}</dd></div><div><dt>{c.threshold}</dt><dd>{head.threshold > 1 ? c.off : `${Math.round(head.threshold * 100)}%`}</dd></div>{kind === "description" && <div><dt>{c.blend}</dt><dd>{Math.round((status.report?.description_context_selection?.weight ?? 0) * 100)}%</dd></div>}</dl><p className="lab-footnote">{head.calibrated ? c.calibrated : c.uncalibrated}</p>
+          </article>;
+        })}</div>
+      </section>
+    </>}
+    {status && <ParameterGuide status={status} />}
+    <div><span className="lab-kicker">03 / {c.test}</span><PredictionTester /></div>
+    {status?.report && <details className="card lab-details"><summary><span>{c.evaluation}</span><span className="lab-expand" aria-hidden="true">+</span></summary><p className="lab-help">{c.evaluationHint}</p><ModelEvaluation status={status} /></details>}
+  </main>;
 }

@@ -21,6 +21,7 @@ from app.schemas import (
     TransactionResponse,
 )
 from app.services.account_balances import monthly_account_balances
+from app.services.learning_sync import queue_transaction, try_synchronize
 from app.services.transactions import (
     TransactionValidationError,
     create_transaction as create_transaction_service,
@@ -99,6 +100,9 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=404, detail="Account not found")
     # Foreign-key enforcement is enabled, so remove account-owned import
     # batches explicitly. Their draft rows are deleted by the ORM cascade.
+    # Snapshot deletions before draft cascades can clear import provenance.
+    for transaction in list(account.transactions):
+        queue_transaction(db, transaction, operation="delete")
     batches = db.scalars(select(ImportBatch).where(ImportBatch.account_id == account_id))
     for batch in batches:
         _remove_local_file(batch.stored_path)
@@ -108,6 +112,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
         db.delete(transaction)
     db.delete(account)
     db.commit()
+    try_synchronize(db)
 
 
 @router.put("/accounts/{account_id}", response_model=AccountResponse)
@@ -183,11 +188,13 @@ def delete_category(category_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=404, detail="Category not found")
     for transaction in category.transactions:
         transaction.category_id = None
+        queue_transaction(db, transaction)
     children = db.scalars(select(Category).where(Category.parent_id == category_id))
     for child in children:
         child.parent_id = None
     db.delete(category)
     db.commit()
+    try_synchronize(db)
 
 
 @router.post(

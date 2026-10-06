@@ -54,11 +54,7 @@ if (
 # SQLAlchemy SQLite URLs use forward slashes, including on Windows.
 $databaseUrlDirectory = $databaseDirectory.Replace("\", "/")
 $env:DATABASE_URL = "sqlite:///$databaseUrlDirectory/life_budget.db"
-$env:LEARNING_DATABASE_URL = "sqlite:///$databaseUrlDirectory/life_budget_learning.db"
-$env:TYPE_LEARNING_DATABASE_URL = "sqlite:///$databaseUrlDirectory/life_budget_type_learning.db"
-$env:DESCRIPTION_LEARNING_DATABASE_URL = (
-    "sqlite:///$databaseUrlDirectory/life_budget_description_learning.db"
-)
+$env:PREDICTION_DATABASE_URL = "sqlite:///$databaseUrlDirectory/life_budget_predictions.db"
 $env:UPLOAD_DIR = $uploadDirectory
 
 Push-Location $backendDirectory
@@ -66,9 +62,9 @@ try {
     # Upgrade every independent SQLite schema before accepting requests. A
     # failed migration stops startup instead of leaving a partly usable app.
     & $python -m alembic upgrade head
-    & $python -m alembic -c alembic_learning.ini upgrade head
-    & $python -m alembic -c alembic_type_learning.ini upgrade head
-    & $python -m alembic -c alembic_description_learning.ini upgrade head
+    if ($LASTEXITCODE -ne 0) { throw "Financial migration failed." }
+    & $python -m alembic -c alembic_predictions.ini upgrade head
+    if ($LASTEXITCODE -ne 0) { throw "Prediction migration failed." }
 }
 finally {
     Pop-Location
@@ -81,6 +77,7 @@ if (-not $SkipBuild) {
         # origin that serves the frontend, avoiding CORS and port duplication.
         $env:VITE_API_BASE_URL = ""
         & $npm.Source run build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
     }
     finally {
         Pop-Location
